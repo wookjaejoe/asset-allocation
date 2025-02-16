@@ -14,8 +14,7 @@
 
 import numpy as np
 import pandas as pd
-import yfinance as yf
-from common import make_report
+from strategy.common import InvestmentStrategy
 
 
 class Assets:
@@ -27,43 +26,36 @@ class Assets:
         return set(cls.aggressive) | set(cls.defensive)
 
 
-def run():
-    chart = yf.download(Assets.all(), start="2007-01-01")
-    chart = chart[[col for col in chart.columns if col[0] == "Close"]]
-    chart.columns = [col[1] for col in chart.columns]
-    chart = chart.dropna()
+class InvestmentStrategyMDM(InvestmentStrategy):
+    @classmethod
+    def get_assets(cls) -> set:
+        return Assets.all()
 
-    month_chart = chart.resample("ME").last()
-    month_chart = month_chart.rename(index={month_chart.index[-1]: chart.index[-1]})
+    def get_portfolio(self) -> pd.Series:
+        # 12개월 및 6개월 수익률 계산
+        returns_12m = self.month_chart.pct_change(12)
+        returns_6m = self.month_chart.pct_change(6)
 
-    # 12개월 및 6개월 수익률 계산
-    returns_12m = month_chart.pct_change(12)
-    returns_6m = month_chart.pct_change(6)
+        # SPY 12개월 수익률 확인
+        spy_return = returns_12m["SPY"]
+        is_aggressive = spy_return > 0
 
-    # SPY 12개월 수익률 확인
-    spy_return = returns_12m["SPY"]
-    is_aggressive = spy_return > 0
+        # 공격자산 선택 (SPY vs EFA 중 12개월 수익률이 높은 자산 100%)
+        aggressive_choice: pd.Series = returns_12m[Assets.aggressive][is_aggressive].idxmax(axis=1)
+        aggressive_choice = aggressive_choice.apply(lambda x: [x])
 
-    # 공격자산 선택 (SPY vs EFA 중 12개월 수익률이 높은 자산 100%)
-    aggressive_choice = returns_12m[Assets.aggressive].idxmax(axis=1)
+        # 안전자산 선택 (6개월 수익률 상위 3개 균등 투자)
+        defensive_choice: pd.Series = returns_6m[Assets.defensive][~is_aggressive]
+        defensive_choice = defensive_choice.apply(lambda x: list(x.nlargest(3).index), axis=1)
 
-    # 안전자산 선택 (6개월 수익률 상위 3개 균등 투자)
-    defensive_choice = returns_6m[Assets.defensive].apply(lambda x: list(x.nlargest(3).index), axis=1)
+        tickers: pd.Series = pd.concat([aggressive_choice, defensive_choice]).sort_index()
+        tickers = tickers.dropna()
 
-    # 최종 포트폴리오 결정
-    tickers = pd.concat([aggressive_choice[is_aggressive], defensive_choice[~is_aggressive]]).sort_index()
-    tickers = tickers.dropna()
+        # 결과 저장
+        df = pd.DataFrame({
+            "SPY_12m_return": spy_return,
+            "tickers": tickers
+        })
+        df.to_csv("./output/mdm.csv")
 
-    # 결과 저장
-    df = pd.DataFrame({
-        "SPY_12m_return": spy_return,
-        "tickers": tickers
-    })
-    df.to_csv("./output/mdm.csv")
-
-    tickers = tickers.fillna(np.nan).reindex(chart.index, method="ffill").shift(1).dropna()
-    make_report(chart, tickers, "./output/mdm.html")
-
-
-if __name__ == '__main__':
-    run()
+        return tickers.fillna(np.nan).reindex(self.chart.index, method="ffill").shift(1).dropna()

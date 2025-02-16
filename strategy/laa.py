@@ -15,8 +15,7 @@
 
 import numpy as np
 import pandas as pd
-import yfinance as yf
-from common import make_report
+from strategy.common import InvestmentStrategy
 
 
 class Assets:
@@ -28,46 +27,38 @@ class Assets:
         return set(cls.static) | set(cls.dynamic)
 
 
-def run():
-    chart = yf.download(Assets.all(), start="2007-01-01")
-    chart = chart[[col for col in chart.columns if col[0] == "Close"]]
-    chart.columns = [col[1] for col in chart.columns]
-    chart = chart.dropna()
+class InvestmentStrategyLAA(InvestmentStrategy):
+    @classmethod
+    def get_assets(cls) -> set:
+        return Assets.all()
 
-    month_chart = chart.resample("ME").last()
-    month_chart = month_chart.rename(index={month_chart.index[-1]: chart.index[-1]})
+    def get_portfolio(self) -> pd.Series:
+        unemployment = pd.read_csv(
+            "./input/unemployment.csv",
+            parse_dates=["reported"])
+        unemployment = unemployment.sort_values("reported")
+        unemployment = unemployment.reset_index(drop=True)
+        unemployment = unemployment.rename(columns={"reported": "Date", "value": "unemployment"})
 
-    unemployment = pd.read_csv(
-        "../input/unemployment.csv",
-        parse_dates=["reported"])
-    unemployment = unemployment.sort_values("reported")
-    unemployment = unemployment.reset_index(drop=True)
-    unemployment = unemployment.rename(columns={"reported": "Date", "value": "unemployment"})
+        spy_200_ma = self.chart["SPY"].rolling(window=200).mean().resample("ME").last()
+        spy_200_ma = spy_200_ma.rename("spy_200_ma")
+        spy_200_ma = spy_200_ma.rename(index={spy_200_ma.index[-1]: self.chart.index[-1]})
 
-    spy_200_ma = chart["SPY"].rolling(window=200).mean().resample("ME").last()
-    spy_200_ma = spy_200_ma.rename("spy_200_ma")
-    spy_200_ma = spy_200_ma.rename(index={spy_200_ma.index[-1]: chart.index[-1]})
+        df = pd.merge_asof(
+            spy_200_ma,  # 기준 데이터 (월말 이동평균)
+            unemployment,  # 매핑할 데이터 (실업률)
+            on="Date",  # 기준 컬럼 (날짜)
+            direction="backward"  # 과거 값 중 가장 가까운 값 선택
+        )
+        df = df.set_index("Date")
+        df["unemployment_12_ma"] = df["unemployment"].rolling(window=12).mean().round(2)
+        df["SPY"] = self.month_chart["SPY"]
+        df["spy_200_ma"] = spy_200_ma
+        df = df[["SPY", "spy_200_ma", "unemployment", "unemployment_12_ma"]]
+        df["condition1"] = self.month_chart["SPY"] > spy_200_ma
+        df["condition2"] = df["unemployment"] > df["unemployment_12_ma"]
+        df["condition"] = df["condition1"] | df["condition2"]
+        df["tickers"] = df["condition"].apply(lambda x: Assets.static + (["QQQ"] if x else ["SHY"]))
 
-    df = pd.merge_asof(
-        spy_200_ma,  # 기준 데이터 (월말 이동평균)
-        unemployment,  # 매핑할 데이터 (실업률)
-        on="Date",  # 기준 컬럼 (날짜)
-        direction="backward"  # 과거 값 중 가장 가까운 값 선택
-    )
-    df = df.set_index("Date")
-    df["unemployment_12_ma"] = df["unemployment"].rolling(window=12).mean().round(2)
-    df["SPY"] = month_chart["SPY"]
-    df["spy_200_ma"] = spy_200_ma
-    df = df[["SPY", "spy_200_ma", "unemployment", "unemployment_12_ma"]]
-    df["condition1"] = month_chart["SPY"] > spy_200_ma
-    df["condition2"] = df["unemployment"] > df["unemployment_12_ma"]
-    df["condition"] = df["condition1"] | df["condition2"]
-    df["tickers"] = df["condition"].apply(lambda x: Assets.static + (["QQQ"] if x else ["SHY"]))
-
-    df.to_csv("./output/laa.csv")
-    tickers = df["tickers"].fillna(np.nan).reindex(chart.index, method="ffill").shift(1).dropna()
-    make_report(chart, tickers, "./output/laa.html")
-
-
-if __name__ == '__main__':
-    run()
+        df.to_csv("./output/laa.csv")
+        return df["tickers"].fillna(np.nan).reindex(self.chart.index, method="ffill").shift(1).dropna()

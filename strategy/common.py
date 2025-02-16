@@ -11,7 +11,14 @@ class InvestmentStrategy:
         self.chart = chart
         self.month_chart = month_chart
 
-    def select_tickers(self) -> pd.Series:
+    @classmethod
+    def get_assets(cls) -> set:
+        """
+        :return: 전략의 관심 ticker 목록
+        """
+        ...
+
+    def get_portfolio(self) -> pd.Series:
         """
         :return: 날짜별 보유 ticker 목록
         """
