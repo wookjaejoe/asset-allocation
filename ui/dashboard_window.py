@@ -14,9 +14,9 @@ colors = [
 
 class DashboardWindow(QMainWindow):
     def __init__(
-        self,
-        data: dict,
-        text: str
+            self,
+            data: dict,
+            text: str
     ):
         super().__init__()
         self.setWindowTitle("Dashboard")
@@ -122,7 +122,7 @@ class DashboardWindow(QMainWindow):
         self.number_input.setValidator(validator)
         layout.addWidget(self.number_input)
 
-        self.new_text = QLabel("Enter the total investment amount!")
+        self.new_text = QLabel("Please enter the total investment amount in the correct format.")
         self.new_text.setFont(QFont("Arial", 12))
         self.new_text.setWordWrap(True)
         self.new_text.setStyleSheet("color: lightgrey;")
@@ -134,10 +134,15 @@ class DashboardWindow(QMainWindow):
 
     def update_label(self):
         user_text = self.number_input.text()
-        amount = int(user_text)
-        text = f"""
+
+        try:
+            amount = int(user_text)
+            text = f"""
 {"\n".join([f"{k} = {round(amount * v / 100):,}" for k, v in self.data.items()])}
 """
+        except:
+            text = "Please enter the total investment amount in the correct format."
+
         self.new_text.setText(text)
 
     @staticmethod
