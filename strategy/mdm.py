@@ -28,10 +28,14 @@ class Assets:
 
 class InvestmentStrategyMDM(InvestmentStrategy):
     @classmethod
+    def get_name(cls):
+        return "MDM"
+
+    @classmethod
     def get_assets(cls) -> set:
         return Assets.all()
 
-    def get_portfolio(self) -> pd.Series:
+    def calc_portfolio(self) -> pd.Series:
         # 12개월 및 6개월 수익률 계산
         returns_12m = self.month_chart.pct_change(12)
         returns_6m = self.month_chart.pct_change(6)

@@ -29,10 +29,14 @@ class InvestmentStrategyBDA(InvestmentStrategy):
     """
 
     @classmethod
+    def get_name(cls):
+        return "BDA"
+
+    @classmethod
     def get_assets(cls) -> set:
         return Assets.all()
 
-    def get_portfolio(self) -> pd.Series:
+    def calc_portfolio(self) -> pd.Series:
         # 6개월 수익률 계산
         returns_6m = self.month_chart.pct_change(6)
 

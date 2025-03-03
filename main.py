@@ -1,45 +1,93 @@
+import sys
+import time
+
+from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtWidgets import QApplication
+
 from strategy import *
-from strategy.common import InvestmentStrategy
-import yfinance as yf
-import pandas as pd
+from ui import CalculatingWindow, DashboardWindow
+from datetime import datetime
+import textwrap
 
 
-class InvestmentStrategyMerged(InvestmentStrategy):
-    strategy_types = [
-        InvestmentStrategyBAA,
-        InvestmentStrategyBDA,
-        InvestmentStrategyLAA,
-        InvestmentStrategyMDM
-    ]
+# 계산 작업을 수행하는 QThread 기반 Worker
+class CalculationWorker(QThread):
+    calculation_done = pyqtSignal()
+    progress_update = pyqtSignal(str)
+    progress_percent = pyqtSignal(int)
 
-    @classmethod
-    def get_assets(cls) -> set:
-        return set.union(*(strategy.get_assets() for strategy in cls.strategy_types))
+    def __init__(self):
+        super().__init__()
+        self.data = {}
+        self.text = ""
 
-    def get_portfolio(self) -> pd.Series:
-        ports = []
-        for strategy_type in self.strategy_types:
-            strategy = strategy_type(chart=self.chart, month_chart=self.month_chart)
-            port = strategy.get_portfolio()
-            ports.append(port)
+    def run(self):
+        self.progress_update.emit("Fetching data...")
+        self.progress_percent.emit(0)
 
-        return pd.concat(ports).groupby(level=0).sum()
+        chart, month_chart = fetch_charts()
+
+        self.progress_update.emit("Backtesting...")
+        self.progress_percent.emit(30)
+
+        strategy = InvestmentStrategyMerged(chart=chart, month_chart=month_chart)
+        portfolio = strategy.portfolio
+        portfolio = portfolio.apply(lambda x: pd.Series(x).value_counts(normalize=True).to_dict())
+
+        ref_date = portfolio.index[-1].date()
+        weights_str = ", ".join([f"{key}={value * 100:.2f}%" for key, value in portfolio.iloc[-1].items()])
+        output = f"{ref_date} final portfolio: {weights_str}"
+        logger.info(output)
+
+        self.data = {k: v * 100 for k, v in portfolio.iloc[-1].items()}
+
+        self.progress_update.emit("Making backtest reports...")
+        self.progress_percent.emit(80)
+
+        strategy.backtest("./output/final")
+        logger.info("Backtest completed successfully.")
+
+        self.text = f"""
+Created Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+Reference Date: {ref_date}
+        """
+
+        self.progress_update.emit("Making backtest reports...")
+        self.progress_percent.emit(100)
+        self.progress_update.emit("Done.")
+        time.sleep(1)
+        self.calculation_done.emit()
 
 
 def main():
-    chart = yf.download(InvestmentStrategyMerged.get_assets(), start="2007-01-01")
-    chart = chart[[col for col in chart.columns if col[0] == "Close"]]
-    chart.columns = [col[1] for col in chart.columns]
-    chart = chart.dropna()
+    app = QApplication(sys.argv)
+    app.setApplicationName("Asset Allocation")
 
-    month_chart = chart.resample("ME").last()
-    month_chart = month_chart.rename(index={month_chart.index[-1]: chart.index[-1]})
-    strategy = InvestmentStrategyMerged(chart=chart, month_chart=month_chart)
-    port = strategy.get_portfolio()
-    port = port.apply(lambda x: sorted(x))
-    weight = port.apply(lambda x: pd.Series(x).value_counts(normalize=True).to_dict())
-    print(weight)
+    # 진행 창 표시
+    progress_window = CalculatingWindow()
+    progress_window.setGeometry(100, 100, 1600, 900)
+    progress_window.show()
+
+    # 계산 Worker 시작
+    worker = CalculationWorker()
+    worker.progress_update.connect(progress_window.message_label.setText)
+    worker.progress_percent.connect(progress_window.progress_bar.setValue)
+    worker.calculation_done.connect(lambda: on_calculation_finished(progress_window, worker.data, worker.text))
+    worker.start()
+
+    sys.exit(app.exec())
 
 
-if __name__ == '__main__':
+def on_calculation_finished(progress_window, data, text):
+    geometry = progress_window.geometry()  # 현재 창 크기 및 위치 정보를 가져옴
+    progress_window.close()
+    result_window = DashboardWindow(data, text)
+    result_window.setGeometry(geometry)  # 동일한 geometry 적용
+    result_window.show()
+
+    global main_result_window
+    main_result_window = result_window
+
+
+if __name__ == "__main__":
     main()

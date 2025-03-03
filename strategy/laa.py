@@ -29,10 +29,14 @@ class Assets:
 
 class InvestmentStrategyLAA(InvestmentStrategy):
     @classmethod
+    def get_name(cls):
+        return "LAA"
+
+    @classmethod
     def get_assets(cls) -> set:
         return Assets.all()
 
-    def get_portfolio(self) -> pd.Series:
+    def calc_portfolio(self) -> pd.Series:
         unemployment = pd.read_csv(
             "./input/unemployment.csv",
             parse_dates=["reported"])

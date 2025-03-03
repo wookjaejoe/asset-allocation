@@ -48,16 +48,28 @@ class InvestmentStrategyBAA(InvestmentStrategy):
     """
 
     @classmethod
+    def get_name(cls):
+        return "BAA"
+
+    @classmethod
     def get_assets(cls) -> set:
         return Assets.all()
 
-    def get_portfolio(self) -> pd.Series:
+    def calc_portfolio(self) -> pd.Series:
         mmt = self.month_chart[list(set(Assets.canaria + Assets.aggressive))].apply(
             self.momentum_score,
             axis=1
         ).dropna()
 
         aggressive_signal = mmt[Assets.canaria].ge(0).all(axis=1)
+
+        pd.concat(
+            [
+                aggressive_signal.rename("Aggressive"),
+                mmt[Assets.canaria]
+            ],
+            axis=1
+        ).sort_index().to_csv("./output/BAA_signals.csv")
 
         # 1. 공격적 자산 선택
         aggressive_selection: pd.Series = (
