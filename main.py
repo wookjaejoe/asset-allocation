@@ -31,7 +31,7 @@ class CalculationWorker(QThread):
             self.progress_update.emit("Backtesting...")
             self.progress_percent.emit(30)
 
-            strategy = InvestmentStrategyMerged(chart=chart, month_chart=month_chart)
+            strategy = InvestmentStrategyIntegration(chart=chart, month_chart=month_chart)
             portfolio = strategy.portfolio
             portfolio = portfolio.apply(lambda x: pd.Series(x).value_counts(normalize=True).to_dict())
 

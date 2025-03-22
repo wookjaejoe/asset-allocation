@@ -14,7 +14,7 @@
 
 import numpy as np
 import pandas as pd
-from strategy.common import InvestmentStrategy
+from strategy.common import InvestmentStrategy, Portfolio
 
 
 class Assets:
@@ -62,4 +62,5 @@ class InvestmentStrategyMDM(InvestmentStrategy):
         })
         df.to_csv("./output/mdm.csv")
 
+        tickers = tickers.apply(lambda row: Portfolio.from_series(row))
         return tickers.fillna(np.nan).reindex(self.chart.index, method="ffill").shift(1).dropna()

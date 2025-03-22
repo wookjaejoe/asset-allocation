@@ -1,6 +1,8 @@
+from ftplib import print_line
+
 from logger import logger
 import pandas as pd
-from .common import InvestmentStrategy
+from .common import InvestmentStrategy, Portfolio
 import yfinance as yf
 
 from .baa import InvestmentStrategyBAA
@@ -9,7 +11,7 @@ from .laa import InvestmentStrategyLAA
 from .mdm import InvestmentStrategyMDM
 
 
-class InvestmentStrategyMerged(InvestmentStrategy):
+class InvestmentStrategyIntegration(InvestmentStrategy):
     strategy_types = [
         InvestmentStrategyBAA,
         InvestmentStrategyBDA,
@@ -30,16 +32,39 @@ class InvestmentStrategyMerged(InvestmentStrategy):
             strategy = strategy_type(chart=self.chart, month_chart=self.month_chart)
             strategy.backtest(f"./output/{strategy.get_name()}")
             port = strategy.portfolio
-            ports.append(port)
 
-        merged_portfolio = pd.concat(ports).groupby(level=0).sum()
-        sorted_portfolio = merged_portfolio.apply(lambda x: sorted(x))
+            df = pd.DataFrame({
+                "port": strategy.portfolio,
+                "strategy": strategy.get_name()  # 전체에 동일한 값으로 들어감
+            })
+            ports.append(df)
+
+        merged_portfolio = pd.concat(ports).groupby(level=0).apply(self.merge_portfolio)
         logger.info("Portfolio merging complete.")
-        return sorted_portfolio
+        return merged_portfolio
+
+    @staticmethod
+    def merge_portfolio(ports: pd.DataFrame) -> Portfolio:
+        allocations = {}
+        description = ""
+        for idx, row in ports.iterrows():
+            for name, weight in row["port"].allocations.items():
+                if name in allocations:
+                    allocations[name] += weight
+                else:
+                    allocations[name] = weight
+
+            description += str(row["strategy"]) + ": " + str(row["port"].allocations) + "\n"
+
+        allocations = {
+            k: v / len(ports)
+            for k, v in sorted(allocations.items(), key=lambda item: item[1], reverse=True)
+        }
+        return Portfolio(allocations, description)
 
 
 def fetch_charts() -> (pd.DataFrame, pd.DataFrame):
-    assets = InvestmentStrategyMerged.get_assets()
+    assets = InvestmentStrategyIntegration.get_assets()
     chart = yf.download(assets, start="2007-01-01")
     chart = chart[[col for col in chart.columns if col[0] == "Close"]]
     chart.columns = [col[1] for col in chart.columns]

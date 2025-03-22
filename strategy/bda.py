@@ -11,7 +11,7 @@
 """
 import pandas as pd
 
-from strategy.common import InvestmentStrategy
+from strategy.common import InvestmentStrategy, Portfolio
 
 
 class Assets:
@@ -54,6 +54,7 @@ class InvestmentStrategyBDA(InvestmentStrategy):
             .apply(filter_negative_returns, axis=1)
             .rename("tickers")
         )
+        tickers = tickers.apply(lambda row: Portfolio.from_series(row))
 
         # 결과 저장
         df = pd.DataFrame({"tickers": tickers})

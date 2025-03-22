@@ -27,7 +27,7 @@
 import numpy as np
 import pandas as pd
 
-from strategy.common import InvestmentStrategy
+from strategy.common import InvestmentStrategy, Portfolio
 
 MOMENTUM_WEIGHTS = {period_month: 12 / period_month for period_month in [1, 3, 6, 12]}
 
@@ -85,6 +85,7 @@ class InvestmentStrategyBAA(InvestmentStrategy):
 
         # 3. 공격적/방어적 선택을 병합하고 정렬
         result: pd.Series = pd.concat([aggressive_selection, defensive_selection]).sort_index()
+        result = result.apply(lambda row: Portfolio.from_series(row))
         result = result.fillna(np.nan)
         result = result.reindex(self.chart.index, method="ffill")
         result = result.shift(1)

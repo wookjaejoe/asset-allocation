@@ -15,7 +15,7 @@
 
 import numpy as np
 import pandas as pd
-from strategy.common import InvestmentStrategy
+from strategy.common import InvestmentStrategy, Portfolio
 
 
 class Assets:
@@ -65,4 +65,7 @@ class InvestmentStrategyLAA(InvestmentStrategy):
         df["tickers"] = df["condition"].apply(lambda x: Assets.static + (["QQQ"] if x else ["SHY"]))
 
         df.to_csv("./output/laa.csv")
-        return df["tickers"].fillna(np.nan).reindex(self.chart.index, method="ffill").shift(1).dropna()
+
+        result = df["tickers"]
+        result = result.apply(lambda row: Portfolio.from_series(row))
+        return result.fillna(np.nan).reindex(self.chart.index, method="ffill").shift(1).dropna()
