@@ -4,9 +4,9 @@ from logging.handlers import RotatingFileHandler
 from datetime import datetime
 
 # 로그 디렉토리 설정
-LOG_DIR = "logs"
+LOG_DIR = ".logs"
 if not os.path.exists(LOG_DIR):
-    os.makedirs(LOG_DIR)
+    os.makedirs(LOG_DIR, exist_ok=True)
 
 # 로그 파일 설정
 LOG_FILE = os.path.join(LOG_DIR, "app.log")

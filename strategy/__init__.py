@@ -70,7 +70,7 @@ def fetch_charts() -> (pd.DataFrame, pd.DataFrame):
     chart.columns = [col[1] for col in chart.columns]
     chart = chart.dropna()
 
-    logger.info("Market data successfully fetched and processed.")
+    logger.info("Market res successfully fetched and processed.")
 
     month_chart = chart.resample("ME").last()
     month_chart = month_chart.rename(index={month_chart.index[-1]: chart.index[-1]})

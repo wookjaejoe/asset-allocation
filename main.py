@@ -23,7 +23,7 @@ class CalculationWorker(QThread):
 
     def run(self):
         try:
-            self.progress_update.emit("Fetching data...")
+            self.progress_update.emit("Fetching res...")
             self.progress_percent.emit(0)
 
             chart, month_chart = fetch_charts()

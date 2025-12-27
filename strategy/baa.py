@@ -100,7 +100,7 @@ class InvestmentStrategyBAA(InvestmentStrategy):
         :return: 자산별 수익률
         """
         pos = self.month_chart[row.index].index.get_loc(row.name)
-        assert pos - months >= 0, "Not enough data."
+        assert pos - months >= 0, "Not enough res."
         return row / self.month_chart[row.index].iloc[pos - months] - 1
 
     def momentum_score(self, row: pd.Series):
