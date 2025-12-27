@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import pandas as pd
 import numpy as np
@@ -58,28 +58,29 @@ def select_portfolio(
     lookback: int,
     top: int,
     mode: str,
-) -> Dict[str, float]:
+) -> Tuple[Dict[str, float], pd.Series]:
     window = prices.loc[:rebalance_date].tail(lookback + 1)
     if len(window) < lookback + 1:
-        return {}
+        return {}, pd.Series(dtype=float)
 
     # lookback 구간에 결측이 없는 종목만 고려
     valid_cols = [c for c in universe if window[c].notna().all()]
     if not valid_cols:
-        return {}
+        return {}, pd.Series(dtype=float)
 
     rets = window[valid_cols].iloc[-1] / window[valid_cols].iloc[0] - 1
     candidates = rets.dropna()
     if candidates.empty:
-        return {}
+        return {}, pd.Series(dtype=float)
 
     sorted_candidates = candidates.sort_values(ascending=(mode == "tail"))
     picks = sorted_candidates.head(top)
     if picks.empty:
-        return {}
+        return {}, pd.Series(dtype=float)
 
     weight = 1 / len(picks)
-    return {t: weight for t in picks.index}
+    weights = {t: weight for t in picks.index}
+    return weights, candidates.loc[picks.index]
 
 
 def run_backtest(args: argparse.Namespace) -> tuple[pd.Series, List[Dict[str, object]], pd.Series | None]:
@@ -100,7 +101,7 @@ def run_backtest(args: argparse.Namespace) -> tuple[pd.Series, List[Dict[str, ob
     monthly_records: List[Dict[str, object]] = []
     for i, reb_date in enumerate(rebal_dates):
         universe = pick_universe(history, reb_date, prices)
-        weights = select_portfolio(prices, universe, reb_date, args.lookback, args.top, args.mode)
+        weights, rank_rets = select_portfolio(prices, universe, reb_date, args.lookback, args.top, args.mode)
 
         next_date = rebal_dates[i + 1] if i + 1 < len(rebal_dates) else prices.index[-1]
         segment = prices.loc[(prices.index > reb_date) & (prices.index <= next_date)]
@@ -151,10 +152,38 @@ def run_backtest(args: argparse.Namespace) -> tuple[pd.Series, List[Dict[str, ob
         port_returns.append(port_ret)
 
         month_ret = (1 + port_ret).prod() - 1 if not port_ret.empty else 0.0
+
+        lookback_window = prices.loc[:reb_date].tail(args.lookback + 1)
+        lookback_start = lookback_window.index[0].date()
+        lookback_end = reb_date.date()
+        buy_date = segment.index.min().date() if not segment.empty else None
+        sell_date = segment.index.max().date() if not segment.empty else None
+
+        holdings_detail = ""
+        if isinstance(holding_returns, pd.Series) and not holding_returns.empty:
+            cols = holding_returns.index
+            # anchor 가격과 종료 가격
+            anchor_prices = prices.loc[:reb_date, cols].iloc[-1]
+            exit_prices = segment[cols].iloc[-1]
+            parts = []
+            for t in cols:
+                lb_ret = rank_rets.get(t, np.nan)
+                mret = holding_returns.get(t, np.nan)
+                buy_p = anchor_prices.get(t, np.nan)
+                sell_p = exit_prices.get(t, np.nan)
+                parts.append(
+                    f"{t}:lb={lb_ret:.4f};buy={buy_p:.2f}@{buy_date};sell={sell_p:.2f}@{sell_date};mret={mret:.4f}"
+                )
+            holdings_detail = " | ".join(parts)
+
         monthly_records.append({
             "year_month": reb_date.strftime("%Y-%m"),
             "rule": STRATEGY_LABEL.get(args.mode, args.mode),
-            "holdings": ";".join(f"{k}={v:.4f}" for k, v in holding_returns.items()) if isinstance(holding_returns, pd.Series) and not holding_returns.empty else "",
+            "lookback_start": lookback_start,
+            "lookback_end": lookback_end,
+            "buy_date": buy_date,
+            "sell_date": sell_date,
+            "holdings": holdings_detail,
             "return": month_ret,
         })
 
