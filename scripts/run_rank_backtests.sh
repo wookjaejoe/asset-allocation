@@ -21,13 +21,13 @@ for mode in "${MODES[@]}"; do
       for rbm in "${REBAL_MONTHS[@]}"; do
         label="rank_${mode}_lk${lb}_top${top}_rbm${rbm}"
         out_dir=".output/${label}"
-        mkdir -p "${out_dir}"
-        echo "Running ${label}..."
-        python scripts/monthly_rank_backtest.py \
-          --lookback "${lb}" \
-          --mode "${mode}" \
-          --top "${top}" \
-          --rebalance-months "${rbm}" \
+      mkdir -p "${out_dir}"
+      echo "Running ${label}..."
+      python scripts/rank_backtest.py \
+        --lookback "${lb}" \
+        --mode "${mode}" \
+        --top "${top}" \
+        --rebalance-months "${rbm}" \
           --output "${out_dir}/rank_backtest.csv" \
           --monthly-output "${out_dir}/rank_monthly.csv" \
           --report "${out_dir}/rank_report.html"

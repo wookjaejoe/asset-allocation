@@ -61,24 +61,30 @@ def load_daily_metrics(path: Path) -> Dict[str, float]:
     }
 
 
-def load_monthly_metrics(path: Path) -> Dict[str, object]:
+def load_period_metrics(path: Path) -> Dict[str, object]:
     df = pd.read_csv(path, parse_dates=["lookback_start", "lookback_end", "buy_date", "sell_date"])
     if df.empty:
         return {
             "months": 0,
-            "monthly_return_mean": float("nan"),
-            "monthly_return_std": float("nan"),
-            "monthly_active_mean": float("nan"),
-            "last_return": float("nan"),
-            "last_active_return": float("nan"),
+            "period_return_mean": float("nan"),
+            "period_return_std": float("nan"),
+            "period_active_mean": float("nan"),
+            "period_benchmark_mean": float("nan"),
+            "period_benchmark_std": float("nan"),
+            "last_period_return": float("nan"),
+            "last_period_active_return": float("nan"),
+            "last_period_benchmark_return": float("nan"),
         }
     return {
         "months": len(df),
-        "monthly_return_mean": df["return"].mean(),
-        "monthly_return_std": df["return"].std(),
-        "monthly_active_mean": df["active_return"].mean() if "active_return" in df else float("nan"),
-        "last_return": df["return"].iloc[-1],
-        "last_active_return": df["active_return"].iloc[-1] if "active_return" in df else float("nan"),
+        "period_return_mean": df["return"].mean(),
+        "period_return_std": df["return"].std(),
+        "period_active_mean": df["active_return"].mean() if "active_return" in df else float("nan"),
+        "period_benchmark_mean": df["benchmark_return"].mean() if "benchmark_return" in df else float("nan"),
+        "period_benchmark_std": df["benchmark_return"].std() if "benchmark_return" in df else float("nan"),
+        "last_period_return": df["return"].iloc[-1],
+        "last_period_active_return": df["active_return"].iloc[-1] if "active_return" in df else float("nan"),
+        "last_period_benchmark_return": df["benchmark_return"].iloc[-1] if "benchmark_return" in df else float("nan"),
     }
 
 
@@ -100,7 +106,7 @@ def collect_results(output_root: Path) -> pd.DataFrame:
         metrics["daily_path"] = str(daily_path)
         metrics["monthly_path"] = str(monthly_path)
         metrics.update(load_daily_metrics(daily_path))
-        metrics.update(load_monthly_metrics(monthly_path))
+        metrics.update(load_period_metrics(monthly_path))
         rows.append(metrics)
 
     return pd.DataFrame(rows)
@@ -148,10 +154,12 @@ def main():
         "cagr",
         "ann_vol",
         "max_drawdown",
-        "monthly_return_mean",
-        "monthly_active_mean",
-        "last_return",
-        "last_active_return",
+        "period_return_mean",
+        "period_active_mean",
+        "period_benchmark_mean",
+        "last_period_return",
+        "last_period_active_return",
+        "last_period_benchmark_return",
         "months",
         "days",
     ]

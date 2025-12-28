@@ -16,7 +16,7 @@ STRATEGY_LABEL = {"head": "rank_head", "tail": "rank_tail"}
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Monthly rank-based backtest on S&P500 (head=top winners, tail=bottom losers).")
+    p = argparse.ArgumentParser(description="Rank-based backtest on S&P500 with configurable rebalance frequency (head=top winners, tail=bottom losers).")
     p.add_argument("--start", default="2005-01-01", help="백테스트 시작일 (YYYY-MM-DD)")
     p.add_argument("--end", default=None, help="백테스트 종료일 (YYYY-MM-DD, 기본 today)")
     p.add_argument("--rebalance-months", type=int, default=1, help="리밸런스 주기(개월 단위, 기본 월말마다 1)")
@@ -25,7 +25,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--mode", choices=["head", "tail"], default="head", help="수익률 상위(head) / 하위(tail) 선택")
     p.add_argument("--max-daily-change", type=float, default=1, help="일별 수익률 절대값 상한(초과 시 해당 종목 제외). 예: 0.5 = ±50%")
     p.add_argument("--output", default=".output/rank_backtest.csv", help="포트폴리오 수익률 저장 경로")
-    p.add_argument("--monthly-output", default=".output/rank_monthly.csv", help="월별 보유종목/수익률 저장 경로")
+    p.add_argument("--monthly-output", default=".output/rank_monthly.csv", help="리밸런스 구간별 보유종목/수익률 저장 경로 (파일명은 기존 관례)")
     p.add_argument("--report", default=".output/rank_report.html", help="quantstats 리포트 경로")
     return p.parse_args()
 
@@ -103,6 +103,9 @@ def run_backtest(args: argparse.Namespace) -> tuple[pd.Series, List[Dict[str, ob
     if prices.empty:
         raise RuntimeError("Price data is empty; check date range or tickers.")
 
+    # 일별 수익률은 한 번만 계산해 리밸런스마다 슬라이스해서 사용
+    daily_rets = prices.pct_change(fill_method=None).replace([np.inf, -np.inf], pd.NA)
+
     rebal_dates = get_rebalance_dates(prices, args.rebalance_months)
     logger.info(f"Rebalance dates: {len(rebal_dates)} periods (every {args.rebalance_months} month(s))")
 
@@ -134,10 +137,7 @@ def run_backtest(args: argparse.Namespace) -> tuple[pd.Series, List[Dict[str, ob
             else:
                 w = w[valid_cols]
                 w = w / w.sum()
-                anchor = prices.loc[:reb_date, valid_cols].iloc[-1:]
-                seg_with_anchor = pd.concat([anchor, segment[valid_cols]])
-                seg_rets = seg_with_anchor.pct_change(fill_method=None).iloc[1:]
-                seg_rets = seg_rets.replace([np.inf, -np.inf], pd.NA)
+                seg_rets = daily_rets.loc[(daily_rets.index > reb_date) & (daily_rets.index <= next_date), valid_cols]
                 # 과도한 변동 필터링
                 mask_valid = seg_rets.abs().max() <= args.max_daily_change
                 if (~mask_valid).any():
@@ -172,10 +172,7 @@ def run_backtest(args: argparse.Namespace) -> tuple[pd.Series, List[Dict[str, ob
             and segment[t].notna().all()
         ]
         if bench_cols:
-            anchor_bench = prices.loc[:reb_date, bench_cols].iloc[-1:]
-            seg_bench = pd.concat([anchor_bench, segment[bench_cols]])
-            bench_rets = seg_bench.pct_change(fill_method=None).iloc[1:]
-            bench_rets = bench_rets.replace([np.inf, -np.inf], pd.NA)
+            bench_rets = daily_rets.loc[(daily_rets.index > reb_date) & (daily_rets.index <= next_date), bench_cols]
             mask_valid_bench = bench_rets.abs().max() <= args.max_daily_change
             bench_rets = bench_rets.loc[:, mask_valid_bench].fillna(0)
             if not bench_rets.empty:
@@ -249,7 +246,7 @@ def main():
     monthly_path = Path(args.monthly_output)
     monthly_path.parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(monthly_records).to_csv(monthly_path, index=False)
-    logger.info(f"Saved monthly holdings/returns to {args.monthly_output}")
+    logger.info(f"Saved period holdings/returns to {args.monthly_output}")
 
     report_path = Path(args.report)
     report_path.parent.mkdir(parents=True, exist_ok=True)
