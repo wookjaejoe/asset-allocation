@@ -63,8 +63,13 @@ def select_portfolio(
     if len(window) < lookback + 1:
         return {}, pd.Series(dtype=float)
 
-    # lookback 구간에 결측이 없는 종목만 고려
     valid_cols = [c for c in universe if window[c].notna().all()]
+    if len(valid_cols) < len(universe):
+        missing = sorted(set(universe) - set(valid_cols))
+        logger.warning(
+            f"Rebalance {rebalance_date.date()} skipped {len(missing)} tickers with missing data in lookback: {', '.join(missing[:20])}"
+            + ("..." if len(missing) > 20 else "")
+        )
     if not valid_cols:
         return {}, pd.Series(dtype=float)
 
