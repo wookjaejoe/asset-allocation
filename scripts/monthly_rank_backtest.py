@@ -7,10 +7,9 @@ from typing import Dict, List, Tuple
 import pandas as pd
 import numpy as np
 import quantstats as qs
-import yfinance as yf
-
 from lib.sp500_history import SP500History
 from lib.market_data import normalize_ticker
+from lib.price_cache import load_prices_with_cache
 from logger import logger
 
 STRATEGY_LABEL = {"head": "rank_head", "tail": "rank_tail"}
@@ -31,13 +30,11 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_price_data(tickers: List[str], start: str, end: str | None) -> pd.DataFrame:
-    logger.info(f"Downloading prices for {len(tickers)} tickers from {start} to {end or 'today'}")
-    data = yf.download(tickers=tickers, start=start, end=end, auto_adjust=True, progress=True)
-    closes = data["Close"] if isinstance(data.columns, pd.MultiIndex) else data
-    closes = closes.dropna(how="all").dropna(axis=1, how="all").sort_index()
-    logger.info(f"Dropped all-NaN columns, remaining tickers: {len(closes.columns)}")
-    logger.info(f"Price matrix shape: {closes.shape}")
-    return closes
+    # 가격 데이터는 캐시를 우선 사용하고, staleness 정책(1시간 부분 업데이트, 1일 전체 재다운로드)에 따라 갱신한다.
+    prices = load_prices_with_cache(tickers, start, end)
+    logger.info(f"Dropped all-NaN columns, remaining tickers: {len(prices.columns)}")
+    logger.info(f"Price matrix shape: {prices.shape}")
+    return prices
 
 
 def get_rebalance_dates(prices: pd.DataFrame) -> List[pd.Timestamp]:
