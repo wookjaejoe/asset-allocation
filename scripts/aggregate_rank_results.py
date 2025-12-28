@@ -9,15 +9,21 @@ from typing import Dict, List, Optional
 import pandas as pd
 
 
-LABEL_RE = re.compile(r"rank_(head|tail)_lk(\d+)_top(\d+)")
+LABEL_RE = re.compile(r"rank_(head|tail)_lk(\d+)_top(\d+)(?:_rbm(\d+))?")
 
 
 def parse_label(name: str) -> Optional[Dict[str, object]]:
     m = LABEL_RE.fullmatch(name)
     if not m:
         return None
-    mode, lb, top = m.groups()
-    return {"label": name, "mode": mode, "lookback": int(lb), "top": int(top)}
+    mode, lb, top, rbm = m.groups()
+    return {
+        "label": name,
+        "mode": mode,
+        "lookback": int(lb),
+        "top": int(top),
+        "rebalance_months": int(rbm) if rbm is not None else 1,
+    }
 
 
 def max_drawdown(series: pd.Series) -> float:
@@ -125,7 +131,7 @@ def main():
         print("No rank_* results found under", root)
         return
 
-    df_sorted = df.sort_values(["mode", "lookback", "top"])
+    df_sorted = df.sort_values(["mode", "lookback", "top", "rebalance_months"])
     out_csv = Path(args.summary_csv)
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     df_sorted.to_csv(out_csv, index=False)
@@ -138,6 +144,7 @@ def main():
         "mode",
         "lookback",
         "top",
+        "rebalance_months",
         "cagr",
         "ann_vol",
         "max_drawdown",

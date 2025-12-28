@@ -19,6 +19,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Monthly rank-based backtest on S&P500 (head=top winners, tail=bottom losers).")
     p.add_argument("--start", default="2005-01-01", help="백테스트 시작일 (YYYY-MM-DD)")
     p.add_argument("--end", default=None, help="백테스트 종료일 (YYYY-MM-DD, 기본 today)")
+    p.add_argument("--rebalance-months", type=int, default=1, help="리밸런스 주기(개월 단위, 기본 월말마다 1)")
     p.add_argument("--lookback", type=int, default=30, help="수익률 계산에 사용할 lookback 거래일 수 (n)")
     p.add_argument("--top", type=int, default=10, help="선택할 종목 수 (m)")
     p.add_argument("--mode", choices=["head", "tail"], default="head", help="수익률 상위(head) / 하위(tail) 선택")
@@ -37,9 +38,17 @@ def load_price_data(tickers: List[str], start: str, end: str | None) -> pd.DataF
     return prices
 
 
-def get_rebalance_dates(prices: pd.DataFrame) -> List[pd.Timestamp]:
+def get_rebalance_dates(prices: pd.DataFrame, every_months: int = 1) -> List[pd.Timestamp]:
     by_month = prices.groupby(prices.index.to_period("M")).apply(lambda df: df.index.max())
-    return list(by_month.sort_values())
+    monthly_ends = list(by_month.sort_values())
+    if every_months <= 1:
+        return monthly_ends
+    stepped = monthly_ends[::every_months] if monthly_ends else []
+    if monthly_ends:
+        last = monthly_ends[-1]
+        if not stepped or last != stepped[-1]:
+            stepped.append(last)
+    return stepped
 
 
 def pick_universe(history: SP500History, date: pd.Timestamp, prices: pd.DataFrame) -> List[str]:
@@ -94,8 +103,8 @@ def run_backtest(args: argparse.Namespace) -> tuple[pd.Series, List[Dict[str, ob
     if prices.empty:
         raise RuntimeError("Price data is empty; check date range or tickers.")
 
-    rebal_dates = get_rebalance_dates(prices)
-    logger.info(f"Rebalance dates: {len(rebal_dates)} months")
+    rebal_dates = get_rebalance_dates(prices, args.rebalance_months)
+    logger.info(f"Rebalance dates: {len(rebal_dates)} periods (every {args.rebalance_months} month(s))")
 
     port_returns: List[pd.Series] = []
     bench_returns: List[pd.Series] = []

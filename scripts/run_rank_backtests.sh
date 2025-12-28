@@ -7,6 +7,8 @@ set -euo pipefail
 LOOKBACKS=("20" "60" "120" "252")
 MODES=("head" "tail")
 TOPS=("10" "20" "50")
+REBAL_MONTHS=("1" "3" "6")
+SKIP_AGGREGATE="${SKIP_AGGREGATE:-0}"
 
 mkdir -p .output
 
@@ -16,19 +18,29 @@ export PYTHONPATH="${REPO_ROOT}:${PYTHONPATH:-}"
 for mode in "${MODES[@]}"; do
   for lb in "${LOOKBACKS[@]}"; do
     for top in "${TOPS[@]}"; do
-      label="rank_${mode}_lk${lb}_top${top}"
-      out_dir=".output/${label}"
-      mkdir -p "${out_dir}"
-      echo "Running ${label}..."
-      python scripts/monthly_rank_backtest.py \
-        --lookback "${lb}" \
-        --mode "${mode}" \
-        --top "${top}" \
-        --output "${out_dir}/rank_backtest.csv" \
-        --monthly-output "${out_dir}/rank_monthly.csv" \
-        --report "${out_dir}/rank_report.html"
+      for rbm in "${REBAL_MONTHS[@]}"; do
+        label="rank_${mode}_lk${lb}_top${top}_rbm${rbm}"
+        out_dir=".output/${label}"
+        mkdir -p "${out_dir}"
+        echo "Running ${label}..."
+        python scripts/monthly_rank_backtest.py \
+          --lookback "${lb}" \
+          --mode "${mode}" \
+          --top "${top}" \
+          --rebalance-months "${rbm}" \
+          --output "${out_dir}/rank_backtest.csv" \
+          --monthly-output "${out_dir}/rank_monthly.csv" \
+          --report "${out_dir}/rank_report.html"
+      done
     done
   done
 done
+
+if [ "${SKIP_AGGREGATE}" != "1" ]; then
+  echo "Aggregating results..."
+  python scripts/aggregate_rank_results.py
+else
+  echo "Skipping aggregation (set SKIP_AGGREGATE=1)."
+fi
 
 echo "Done."
