@@ -59,12 +59,16 @@
 - `ann_vol`: 연환산 변동성(수익률의 흔들림 정도).
 - `max_drawdown`: 최대 낙폭(최고점 대비 얼마나 크게 빠졌는지).
 - `months`: 리밸런스 구간 개수(월·분기·반기).
-- `period_return_mean`: 리밸런스 구간(선택한 주기) 수익률 평균.
-- `period_benchmark_mean`: 같은 구간 벤치마크(유니버스 평균) 수익률 평균.
-- `period_active_mean`: 리밸런스 구간별 초과 수익 평균(`return - benchmark_return`).
+- `period_return_mean`: 리밸런스 구간(선택한 주기) 포트 수익률 평균.
+- `period_benchmark_mean`: 같은 구간 유니버스 균등가중 벤치마크 수익률 평균.
+- `period_spy_mean`: 같은 구간 SPY 수익률 평균.
+- `period_active_mean`: 유니버스 벤치마크 대비 초과 수익 평균(`return - benchmark_return`).
+- `period_active_spy_mean`: SPY 대비 초과 수익 평균(`return - spy_return`).
 - `last_period_return`: 마지막 리밸런스 구간 포트 수익률.
-- `last_period_benchmark_return`: 마지막 리밸런스 구간 벤치마크 수익률.
-- `last_period_active_return`: 마지막 리밸런스 구간 초과 수익.
+- `last_period_benchmark_return`: 마지막 리밸런스 구간 유니버스 벤치마크 수익률.
+- `last_period_spy_return`: 마지막 리밸런스 구간 SPY 수익률.
+- `last_period_active_return`: 마지막 구간 유니버스 대비 초과 수익.
+- `last_period_active_spy_return`: 마지막 구간 SPY 대비 초과 수익.
 
 ## `rank_report.html`(요약 리포트) 안내
 TODO

@@ -67,24 +67,28 @@ def load_period_metrics(path: Path) -> Dict[str, object]:
         return {
             "months": 0,
             "period_return_mean": float("nan"),
-            "period_return_std": float("nan"),
             "period_active_mean": float("nan"),
             "period_benchmark_mean": float("nan"),
-            "period_benchmark_std": float("nan"),
+            "period_spy_mean": float("nan"),
+            "period_active_spy_mean": float("nan"),
             "last_period_return": float("nan"),
             "last_period_active_return": float("nan"),
             "last_period_benchmark_return": float("nan"),
+            "last_period_spy_return": float("nan"),
+            "last_period_active_spy_return": float("nan"),
         }
     return {
         "months": len(df),
         "period_return_mean": df["return"].mean(),
-        "period_return_std": df["return"].std(),
         "period_active_mean": df["active_return"].mean() if "active_return" in df else float("nan"),
         "period_benchmark_mean": df["benchmark_return"].mean() if "benchmark_return" in df else float("nan"),
-        "period_benchmark_std": df["benchmark_return"].std() if "benchmark_return" in df else float("nan"),
+        "period_spy_mean": df["spy_return"].mean() if "spy_return" in df else float("nan"),
+        "period_active_spy_mean": df["active_return_vs_spy"].mean() if "active_return_vs_spy" in df else float("nan"),
         "last_period_return": df["return"].iloc[-1],
         "last_period_active_return": df["active_return"].iloc[-1] if "active_return" in df else float("nan"),
         "last_period_benchmark_return": df["benchmark_return"].iloc[-1] if "benchmark_return" in df else float("nan"),
+        "last_period_spy_return": df["spy_return"].iloc[-1] if "spy_return" in df else float("nan"),
+        "last_period_active_spy_return": df["active_return_vs_spy"].iloc[-1] if "active_return_vs_spy" in df else float("nan"),
     }
 
 
@@ -157,9 +161,13 @@ def main():
         "period_return_mean",
         "period_active_mean",
         "period_benchmark_mean",
+        "period_spy_mean",
+        "period_active_spy_mean",
         "last_period_return",
         "last_period_active_return",
         "last_period_benchmark_return",
+        "last_period_spy_return",
+        "last_period_active_spy_return",
         "months",
         "days",
     ]

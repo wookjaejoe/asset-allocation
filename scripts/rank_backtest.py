@@ -98,6 +98,8 @@ def run_backtest(args: argparse.Namespace) -> tuple[pd.Series, List[Dict[str, ob
     history = SP500History()
     raw_tickers = history.df["ticker"].unique().tolist()
     tickers = [normalize_ticker(t) for t in raw_tickers]
+    if "SPY" not in tickers:
+        tickers.append("SPY")  # 벤치마크 비교용
 
     prices = load_price_data(tickers, args.start, args.end)
     if prices.empty:
@@ -111,6 +113,7 @@ def run_backtest(args: argparse.Namespace) -> tuple[pd.Series, List[Dict[str, ob
 
     port_returns: List[pd.Series] = []
     bench_returns: List[pd.Series] = []
+    spy_returns: List[pd.Series] = []
     monthly_records: List[Dict[str, object]] = []
     for i, reb_date in enumerate(rebal_dates):
         universe = pick_universe(history, reb_date, prices)
@@ -180,6 +183,16 @@ def run_backtest(args: argparse.Namespace) -> tuple[pd.Series, List[Dict[str, ob
                 bench_month_ret = (1 + bench_ret).prod() - 1
         bench_returns.append(bench_ret)
 
+        # SPY 벤치마크: 동일 기간 SPY 단일 종목 수익률
+        spy_ret = pd.Series(0, index=segment.index)
+        spy_month_ret = None
+        if "SPY" in prices.columns:
+            spy_seg = daily_rets.loc[(daily_rets.index > reb_date) & (daily_rets.index <= next_date), ["SPY"]]
+            if not spy_seg.empty and spy_seg["SPY"].notna().all():
+                spy_ret = spy_seg["SPY"]
+                spy_month_ret = (1 + spy_ret).prod() - 1
+        spy_returns.append(spy_ret)
+
         month_ret = (1 + port_ret).prod() - 1 if not port_ret.empty else 0.0
         active_ret = month_ret - bench_month_ret
 
@@ -216,7 +229,9 @@ def run_backtest(args: argparse.Namespace) -> tuple[pd.Series, List[Dict[str, ob
             "holdings": holdings_detail,
             "return": month_ret,
             "benchmark_return": bench_month_ret,
+            "spy_return": spy_month_ret,
             "active_return": active_ret,
+            "active_return_vs_spy": month_ret - spy_month_ret if spy_month_ret is not None else None,
         })
 
     if not port_returns:
@@ -227,6 +242,11 @@ def run_backtest(args: argparse.Namespace) -> tuple[pd.Series, List[Dict[str, ob
     if bench_series is not None:
         bench_series = bench_series.reindex(port_series.index)
 
+    spy_series = pd.concat(spy_returns).sort_index() if spy_returns else None
+    if spy_series is not None:
+        spy_series = spy_series.reindex(port_series.index)
+
+    # quantstats용 기본 벤치마크는 유니버스 균등가중, SPY는 별도 반환
     return port_series, monthly_records, bench_series
 
 
