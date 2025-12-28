@@ -92,8 +92,6 @@ def run_backtest(args: argparse.Namespace) -> tuple[pd.Series, List[Dict[str, ob
     history = SP500History()
     raw_tickers = history.df["ticker"].unique().tolist()
     tickers = [normalize_ticker(t) for t in raw_tickers]
-    if "SPY" not in tickers:
-        tickers.append("SPY")  # 벤치마크용
 
     prices = load_price_data(tickers, args.start, args.end)
     if prices.empty:
@@ -103,6 +101,7 @@ def run_backtest(args: argparse.Namespace) -> tuple[pd.Series, List[Dict[str, ob
     logger.info(f"Rebalance dates: {len(rebal_dates)} months")
 
     port_returns: List[pd.Series] = []
+    bench_returns: List[pd.Series] = []
     monthly_records: List[Dict[str, object]] = []
     for i, reb_date in enumerate(rebal_dates):
         universe = pick_universe(history, reb_date, prices)
@@ -156,7 +155,30 @@ def run_backtest(args: argparse.Namespace) -> tuple[pd.Series, List[Dict[str, ob
 
         port_returns.append(port_ret)
 
+        # 벤치마크: 리밸런스 시점의 유니버스를 균등 가중하여 월간 수익률 계산
+        bench_ret = pd.Series(0, index=segment.index)
+        bench_month_ret = 0.0
+        bench_cols = [
+            t for t in universe
+            if t in prices.columns
+            and pd.notna(prices.loc[:reb_date, t].iloc[-1])
+            and segment.get(t) is not None
+            and segment[t].notna().all()
+        ]
+        if bench_cols:
+            anchor_bench = prices.loc[:reb_date, bench_cols].iloc[-1:]
+            seg_bench = pd.concat([anchor_bench, segment[bench_cols]])
+            bench_rets = seg_bench.pct_change(fill_method=None).iloc[1:]
+            bench_rets = bench_rets.replace([np.inf, -np.inf], pd.NA)
+            mask_valid_bench = bench_rets.abs().max() <= args.max_daily_change
+            bench_rets = bench_rets.loc[:, mask_valid_bench].fillna(0)
+            if not bench_rets.empty:
+                bench_ret = bench_rets.mean(axis=1)
+                bench_month_ret = (1 + bench_ret).prod() - 1
+        bench_returns.append(bench_ret)
+
         month_ret = (1 + port_ret).prod() - 1 if not port_ret.empty else 0.0
+        active_ret = month_ret - bench_month_ret
 
         lookback_window = prices.loc[:reb_date].tail(args.lookback + 1)
         lookback_start = lookback_window.index[0].date()
@@ -190,22 +212,28 @@ def run_backtest(args: argparse.Namespace) -> tuple[pd.Series, List[Dict[str, ob
             "sell_date": sell_date,
             "holdings": holdings_detail,
             "return": month_ret,
+            "benchmark_return": bench_month_ret,
+            "active_return": active_ret,
         })
 
     if not port_returns:
         raise RuntimeError("No portfolio returns generated.")
 
     port_series = pd.concat(port_returns).sort_index()
-    bench = None
-    if "SPY" in prices.columns:
-        bench = prices["SPY"].pct_change().reindex(port_series.index)
+    bench_series = pd.concat(bench_returns).sort_index() if bench_returns else None
+    if bench_series is not None:
+        bench_series = bench_series.reindex(port_series.index)
 
-    return port_series, monthly_records, bench
+    return port_series, monthly_records, bench_series
 
 
 def main():
     args = parse_args()
     port_ret, monthly_records, benchmark = run_backtest(args)
+
+    # quantstats가 benchmark.name을 참조하므로 기본 이름을 부여
+    if benchmark is not None and benchmark.name is None:
+        benchmark.name = "Benchmark"
 
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -221,7 +249,7 @@ def main():
     report_path.parent.mkdir(parents=True, exist_ok=True)
     qs.reports.html(
         port_ret,
-        benchmark=benchmark,
+        benchmark=benchmark if benchmark is not None and not benchmark.empty else None,
         output=report_path,
         title=f"S&P500 Rank Strategy ({STRATEGY_LABEL.get(args.mode, args.mode)}, lookback={args.lookback}, top={args.top})",
     )
