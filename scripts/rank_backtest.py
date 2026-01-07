@@ -17,7 +17,7 @@ STRATEGY_LABEL = {"head": "rank_head", "tail": "rank_tail"}
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Rank-based backtest on S&P500 with configurable rebalance frequency (head=top winners, tail=bottom losers).")
-    p.add_argument("--start", default="2005-01-01", help="백테스트 시작일 (YYYY-MM-DD)")
+    p.add_argument("--start", default="2015-01-01", help="백테스트 시작일 (YYYY-MM-DD)")
     p.add_argument("--end", default=None, help="백테스트 종료일 (YYYY-MM-DD, 기본 today)")
     p.add_argument("--rebalance-months", type=int, default=1, help="리밸런스 주기(개월 단위, 기본 월말마다 1)")
     p.add_argument("--lookback", type=int, default=30, help="수익률 계산에 사용할 lookback 거래일 수 (n)")
@@ -36,6 +36,14 @@ def load_price_data(tickers: List[str], start: str, end: str | None) -> pd.DataF
     logger.info(f"Dropped all-NaN columns, remaining tickers: {len(prices.columns)}")
     logger.info(f"Price matrix shape: {prices.shape}")
     return prices
+
+
+def compute_fetch_start(start: str | None, lookback_days: int) -> str | None:
+    if not start:
+        return start
+    start_ts = pd.Timestamp(start)
+    fetch_start = start_ts - pd.tseries.offsets.BDay(lookback_days)
+    return fetch_start.strftime("%Y-%m-%d")
 
 
 def get_rebalance_dates(prices: pd.DataFrame, every_months: int = 1) -> List[pd.Timestamp]:
@@ -101,7 +109,8 @@ def run_backtest(args: argparse.Namespace) -> tuple[pd.Series, List[Dict[str, ob
     if "SPY" not in tickers:
         tickers.append("SPY")  # 벤치마크 비교용
 
-    prices = load_price_data(tickers, args.start, args.end)
+    fetch_start = compute_fetch_start(args.start, args.lookback + 1)
+    prices = load_price_data(tickers, fetch_start, args.end)
     if prices.empty:
         raise RuntimeError("Price data is empty; check date range or tickers.")
 
@@ -109,6 +118,15 @@ def run_backtest(args: argparse.Namespace) -> tuple[pd.Series, List[Dict[str, ob
     daily_rets = prices.pct_change(fill_method=None).replace([np.inf, -np.inf], pd.NA)
 
     rebal_dates = get_rebalance_dates(prices, args.rebalance_months)
+    start_ts = pd.Timestamp(args.start) if args.start else None
+    if start_ts is not None:
+        # 시작일 이후 리밸런스만 사용하되, 시작일(또는 이후 첫 거래일)을 리밸런스 기준으로 삽입해 초기 구간 수익이 0으로 찍히는 것을 방지
+        if start_ts < prices.index.min():
+            start_ts = prices.index.min()
+        start_aligned = prices.index[prices.index.get_indexer([start_ts], method="bfill")[0]]
+        rebal_dates = [d for d in rebal_dates if d >= start_ts]
+        if not rebal_dates or start_aligned < rebal_dates[0]:
+            rebal_dates = [start_aligned] + rebal_dates
     logger.info(f"Rebalance dates: {len(rebal_dates)} periods (every {args.rebalance_months} month(s))")
 
     port_returns: List[pd.Series] = []
@@ -246,17 +264,17 @@ def run_backtest(args: argparse.Namespace) -> tuple[pd.Series, List[Dict[str, ob
     if spy_series is not None:
         spy_series = spy_series.reindex(port_series.index)
 
-    # quantstats용 기본 벤치마크는 유니버스 균등가중, SPY는 별도 반환
-    return port_series, monthly_records, bench_series
+    # quantstats용 기본 벤치마크는 SPY로 통일하고, 기존 유니버스 벤치마크는 월별 기록용으로만 유지
+    return port_series, monthly_records, spy_series
 
 
 def main():
     args = parse_args()
     port_ret, monthly_records, benchmark = run_backtest(args)
 
-    # quantstats가 benchmark.name을 참조하므로 기본 이름을 부여
+    # quantstats가 benchmark.name을 참조하므로 기본 이름을 부여 (SPY로 통일)
     if benchmark is not None and benchmark.name is None:
-        benchmark.name = "Benchmark"
+        benchmark.name = "SPY"
 
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)

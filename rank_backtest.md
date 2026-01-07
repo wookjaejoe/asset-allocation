@@ -50,8 +50,10 @@
 - `label`: 실행 조합 이름(예: rank_head_lk60_top20_rbm3).
 - `mode`: head(상승 상위 매수) / tail(하락 하위 매수).
 - `lookback`: 순위를 매길 때 참고한 거래일 수.
+- `lookback_short` / `lookback_mid`: 혼합 전략에서 사용하는 단기/중기 창(해당될 때만 값이 채워짐).
 - `top`: 한 번에 담는 종목 수(모두 동일 비중).
 - `rebalance_months`: 리밸런스 간격(1=매월, 3=분기, 6=반기).
+- `weight_mom` / `weight_rev`: 혼합 전략에서 모멘텀/리버설 스코어 가중치(해당될 때만 값이 채워짐).
 - `daily_path` / `monthly_path`: 생성된 상세 CSV 파일 경로.
 - `daily_start` / `daily_end`: 일별 수익률 시작/종료 날짜.
 - `days`: 일별 수익률 데이터 포인트 수.
@@ -64,6 +66,8 @@
 - `period_spy_mean`: 같은 구간 SPY 수익률 평균.
 - `period_active_mean`: 유니버스 벤치마크 대비 초과 수익 평균(`return - benchmark_return`).
 - `period_active_spy_mean`: SPY 대비 초과 수익 평균(`return - spy_return`).
+- `period_benchmark_cagr`: 유니버스 벤치마크 연복리 수익률(구간 수익률을 누적 후 전체 기간 기준).
+- `period_spy_cagr`: SPY 연복리 수익률(구간 수익률을 누적 후 전체 기간 기준).
 - `last_period_return`: 마지막 리밸런스 구간 포트 수익률.
 - `last_period_benchmark_return`: 마지막 리밸런스 구간 유니버스 벤치마크 수익률.
 - `last_period_spy_return`: 마지막 리밸런스 구간 SPY 수익률.

@@ -6,7 +6,7 @@ set -euo pipefail
 
 LOOKBACKS=("20" "60" "120" "252")
 MODES=("head" "tail")
-TOPS=("10" "20" "50")
+TOPS=("10" "50")
 REBAL_MONTHS=("1" "3" "6")
 SKIP_AGGREGATE="${SKIP_AGGREGATE:-0}"
 
