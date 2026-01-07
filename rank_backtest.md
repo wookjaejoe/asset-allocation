@@ -76,3 +76,68 @@
 
 ## `rank_report.html`(요약 리포트) 안내
 TODO
+
+## 분석 스크립트(룩백/Top 경향)
+- 집계 파일(.output/rank_summary.csv)이 있으면 `python scripts/analyze_rank_summary.py --summary .output/rank_summary.csv --output-md .output/rank_analysis.md`로 룩백·Top·리밸런스 경향 리포트(Markdown)를 만듭니다.
+- 옵션: `--mode head`(또는 tail/mix)로 모드 필터, `--compare-tops 10 50`으로 Top 크기 비교쌍 변경.
+- 산출: `.output/rank_analysis.md`에 룩백별 평균, Top 크기 민감도, Sharpe-like 순위, 리밸런스 안정성(평균/표준편차) 테이블을 포함합니다.
+
+---
+
+## 매일 08:00 이메일(운영 리포트) 스펙(초안)
+### 이 리포트는 무엇이고, 어떻게 계산되나요?
+- **무엇을 알려주나**: “오늘 08:00 KST 기준으로 S&P500에서 어떤 종목을 동일가중으로 보유해야 하는지”를 Head(모멘텀) / Tail(리버설) 각 lookback별 테이블로 보여줍니다.
+- **어떻게 계산하나**: 최신 거래일 종가를 `current_price`, `lookback` 영업일 전 종가를 `lookback_price`로 두고, `(current / lookback) - 1`을 lookback_return으로 계산합니다. 이를 정렬해 상위(top) 또는 하위(top)를 뽑습니다. 가격 데이터는 `yfinance` 기반으로 최근 거래일까지 캐시/다운로드합니다.
+- **왜 믿을 수 있나**: 유니버스는 해당 기준일의 실제 S&P500 편입 종목만 사용하며, 결측·극단 변동(`max_daily_change`) 종목은 제외합니다. lookback은 영업일 기준이라 공휴일·주말이 자동 보정됩니다.
+- **백테스트와 관계**: 일일 이메일은 “지금 무엇을 사야 하나”에 집중하고, 백테스트는 “이 파라미터가 장기적으로 괜찮은가”를 검증합니다. 파라미터를 변경할 때만 백테스트를 다시 돌리면 됩니다.
+고객이 매일 아침 “지금 보유해야 할 종목”과 “해당 전략의 백테스트 성과 요약”을 빠르게 확인할 수 있도록, **HTML 본문(요약 + 테이블)** + **CSV 첨부(실행용)** 형태로 보냅니다.
+
+### 1) 포함 전략
+- **모멘텀(Head)**: 직전 `lookback` 거래일 누적수익률 **상위** `top`개를 **동일가중** 매수.
+- **리버설(Tail)**: 직전 `lookback` 거래일 누적수익률 **하위** `top`개를 **동일가중** 매수.
+  - 운영 메일에서는 리버설을 **단기 10영업일/20영업일** 두 창으로 본다.
+  - 즉, Tail은 `lookback ∈ {10, 20}` 각각에 대해 “가장 많이 떨어진 종목(top개)” 리스트를 만든다.
+
+### 2) 이메일 제목(Subject) 규칙
+- 예: `[Rank] Daily Holdings (2026-01-07 08:00 KST)`
+- 예: `[Rank] Daily Holdings (2026-01-07 08:00 KST) | Head lk=60 top=50 | Tail lk=10/20 top=50`
+
+### 3) 본문(HTML) 구성
+1. **헤더(요약 3줄 이내)**
+   - 기준 시각: `YYYY-MM-DD 08:00 KST` (데이터 기준일은 “가장 최근 거래일”로 별도 표기)
+   - 유니버스: S&P 500 (해당 기준일의 실제 편입 종목)
+   - 공통 규칙: 동일가중, 결측/극단변동(`max_daily_change`) 필터 적용 여부
+2. **오늘 보유 종목(핵심)**
+   - `Head (Momentum)` 테이블: `Rank | Ticker | LookbackPrice | CurrentPrice | LookbackReturn`
+   - `Tail (Reversal, lk=10)` 테이블: 동일 컬럼
+   - `Tail (Reversal, lk=20)` 테이블: 동일 컬럼
+   - Name 소스가 없으므로 **Ticker만 표시**한다.
+3. **(선택) 전일 대비 변경사항**
+   - `Add / Remove`(편입/제외)와 `Weight change`(동일가중이면 보통 0) 요약
+   - 전일 신호를 저장해두는 경우에만 표시
+4. **백테스트 성과 요약(고정 섹션, 짧게)**
+   - “최신 백테스트 산출물”에서 아래 지표를 1줄로 요약(전략별 1줄)
+   - 예: `CAGR | ann_vol | max_drawdown | period_active_mean` (+ 필요시 Sharpe)
+   - 백테스트는 매일 돌리지 않아도 되며, 고객이 원하는 시점에 재실행/갱신한다.
+
+### 4) 첨부 파일(권장)
+1. `signals_YYYYMMDD.csv` (주문/실행용)
+   - 컬럼: `asof_date, data_date, strategy, mode, lookback, top, ticker, rank, lookback_price, current_price, lookback_return`
+   - `strategy`: `rank_head` / `rank_tail`
+   - `mode`: `head` / `tail`
+2. (선택) `rank_summary.csv` 또는 `rank_summary.md`
+   - 최신 백테스트 주요 지표 표(이미 생성돼 있으면 그대로 첨부)
+
+### 5) 운영 파라미터(기본값 제안)
+- `top`: 50 (이메일 보유종목 개수)
+- `Head lookback` 후보: 60 / 120 / 250 (백테스트 결과로 1개 선택해 운영 신호에 고정)
+- `Tail lookback` 후보: 10 / 20 / 40 (운영 신호는 필요 시 1~3개를 병렬로 제공)
+
+### 6) GitHub Actions 운영(권장)
+- **스케줄**: 매일 08:00 KST는 cron 기준 `0 23 * * *`(UTC, 전날 23:00)입니다.
+- **산출물**: `.output/daily/YYYYMMDD/email.html`, `.output/daily/YYYYMMDD/signals.csv` (워크플로우 아티팩트로 업로드)
+- **발송 방식(추천 순)**:
+  1) **SMTP(프로바이더 무관)**: GitHub Secrets에 `SMTP_HOST/PORT/USER/PASS`, `MAIL_FROM`, `MAIL_TO`를 넣고 발송
+     - 운영 관점에서 가장 단순하고, SES/사내메일/Google Workspace SMTP 등으로 대체 가능
+  2) API 기반(예: SendGrid/Mailgun): 토큰 기반이지만 공급자 종속
+- **추천 조합**: AWS SES(SMTP 자격증명) 또는 회사 SMTP (OAuth 없이 자동화가 쉬움)
