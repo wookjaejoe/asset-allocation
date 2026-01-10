@@ -1,9 +1,7 @@
-from ftplib import print_line
-
 from logger import logger
 import pandas as pd
 from .common import InvestmentStrategy, Portfolio
-import yfinance as yf
+from lib.price_cache import load_prices_with_cache
 
 from .baa import InvestmentStrategyBAA
 from .bda import InvestmentStrategyBDA
@@ -25,12 +23,17 @@ class InvestmentStrategyIntegration(InvestmentStrategy):
         logger.info(f"Assets to fetch: {assets}")
         return assets
 
+    def __init__(self, chart: pd.DataFrame, month_chart: pd.DataFrame, run_backtests: bool = True):
+        super().__init__(chart=chart, month_chart=month_chart)
+        self.run_backtests = run_backtests
+
     def calc_portfolio(self) -> pd.Series:
         ports = []
         for strategy_type in self.strategy_types:
             logger.info(f"Processing strategy: {strategy_type.get_name()}")
             strategy = strategy_type(chart=self.chart, month_chart=self.month_chart)
-            strategy.backtest(f"./output/{strategy.get_name()}")
+            if self.run_backtests:
+                strategy.backtest(f"./output/{strategy.get_name()}")
             port = strategy.portfolio
 
             df = pd.DataFrame({
@@ -65,10 +68,8 @@ class InvestmentStrategyIntegration(InvestmentStrategy):
 
 def fetch_charts() -> (pd.DataFrame, pd.DataFrame):
     assets = InvestmentStrategyIntegration.get_assets()
-    chart = yf.download(assets, start="2007-01-01")
-    chart = chart[[col for col in chart.columns if col[0] == "Close"]]
-    chart.columns = [col[1] for col in chart.columns]
-    chart = chart.dropna()
+    chart = load_prices_with_cache(assets, start="2007-01-01", end=None)
+    chart = chart.dropna(how="all").dropna(axis=1, how="all").sort_index()
 
     logger.info("Market res successfully fetched and processed.")
 

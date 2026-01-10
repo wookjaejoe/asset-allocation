@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
 import pandas as pd
-import quantstats as qs
 from dataclasses import dataclass
 from typing import *
 
@@ -32,6 +32,9 @@ class InvestmentStrategy:
         chart: pd.DataFrame,
         month_chart: pd.DataFrame,
     ):
+        # Many strategies persist debug/diagnostic CSVs under ./output.
+        Path("output").mkdir(parents=True, exist_ok=True)
+
         self.chart = chart
         self.month_chart = month_chart
         self.chart_pct_change = self.chart.pct_change()
@@ -66,6 +69,13 @@ class InvestmentStrategy:
         return self._portfolio
 
     def backtest(self, output_prefix: str):
+        import quantstats as qs
+
+        # Ensure parent directory exists for all generated artifacts.
+        prefix_path = Path(output_prefix)
+        if prefix_path.parent and str(prefix_path.parent) != ".":
+            prefix_path.parent.mkdir(parents=True, exist_ok=True)
+
         df = pd.DataFrame()
         df["port"] = self.portfolio
 
@@ -78,15 +88,15 @@ class InvestmentStrategy:
         # 포트폴리오 수익률 계산
         df["return"] = df.dropna().apply(calc_return, axis=1)
         df = df[["port", "return"]].dropna()
-        df.to_csv(output_prefix + ".csv")
+        df.to_csv(str(prefix_path) + ".csv")
 
         pd.DataFrame({
             "allocations": df["port"].apply(lambda x: x.allocations),
             "description": df["port"].apply(lambda x: x.description),
-        }).to_csv(output_prefix + "_port.csv")
+        }).to_csv(str(prefix_path) + "_port.csv")
 
         qs.reports.html(
             df["return"],
             benchmark=self.chart_pct_change["SPY"].reindex(df.index),
-            output=output_prefix + ".html"
+            output=str(prefix_path) + ".html"
         )

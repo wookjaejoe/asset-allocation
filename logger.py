@@ -40,9 +40,9 @@ if logger.hasHandlers():
 logger.addHandler(console_handler)
 logger.addHandler(file_handler)
 
-# 테스트
-logger.debug("This is a DEBUG log")
-logger.info("This is an INFO log")
-logger.warning("This is a WARNING log")
-logger.error("This is an ERROR log")
-logger.critical("This is a CRITICAL log")
+if __name__ == "__main__":
+    logger.debug("This is a DEBUG log")
+    logger.info("This is an INFO log")
+    logger.warning("This is a WARNING log")
+    logger.error("This is an ERROR log")
+    logger.critical("This is a CRITICAL log")

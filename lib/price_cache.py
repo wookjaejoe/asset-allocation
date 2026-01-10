@@ -94,6 +94,14 @@ def load_prices_with_cache(
         needs_full = age >= full_refresh_age
         needs_partial = (age >= partial_refresh_age) and not needs_full
 
+    # If cache is missing any requested tickers, force a full refresh with the requested universe.
+    if prices is not None:
+        missing_cols = [t for t in universe if t not in prices.columns]
+        if missing_cols:
+            logger.info(f"Cache missing {len(missing_cols)} requested tickers; forcing full refresh")
+            needs_full = True
+            needs_partial = False
+
     # Full refresh
     if needs_full:
         logger.info("Cache older than full refresh threshold; downloading full dataset")
@@ -136,4 +144,6 @@ def load_prices_with_cache(
         meta = CacheMeta(created_at=now, start=start, end=end, universe_size=len(universe))
         meta_path.write_text(meta.to_json())
 
-    return prices
+    # Ensure returned frame contains at least the requested tickers (others may exist from prior cache runs).
+    keep = [t for t in universe if t in prices.columns]
+    return prices[keep].copy()

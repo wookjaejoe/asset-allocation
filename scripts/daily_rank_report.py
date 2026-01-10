@@ -255,6 +255,7 @@ def main() -> None:
     for run, df in head_runs + tail_runs:
         if df.empty:
             continue
+        weight = 1.0 / float(args.top) if args.top else float("nan")
         for _, row in df.iterrows():
             records.append(
                 {
@@ -266,6 +267,7 @@ def main() -> None:
                     "top": args.top,
                     "ticker": row["ticker"],
                     "rank": int(row["rank"]),
+                    "weight": weight,
                     "lookback_return": float(row["lookback_return"]),
                     "lookback_price": float(row["lookback_price"]),
                     "current_price": float(row["current_price"]),
@@ -276,6 +278,26 @@ def main() -> None:
 
     signals_path = out_dir / "signals.csv"
     signals_df = pd.DataFrame.from_records(records).sort_values(["mode", "lookback", "rank", "ticker"])
+    # Keep a stable, cross-strategy-friendly column order (asset allocation report will emit the same superset).
+    col_order = [
+        "asof_kst",
+        "data_date",
+        "strategy",
+        "mode",
+        "lookback",
+        "top",
+        "ticker",
+        "rank",
+        "weight",
+        "lookback_return",
+        "lookback_price",
+        "current_price",
+        "lookback_date",
+        "current_date",
+    ]
+    existing = [c for c in col_order if c in signals_df.columns]
+    remaining = [c for c in signals_df.columns if c not in existing]
+    signals_df = signals_df[existing + remaining]
     signals_df.to_csv(signals_path, index=False)
 
     html = _render_html(asof_kst, data_date, args.top, head_runs, tail_runs, args.max_daily_change)

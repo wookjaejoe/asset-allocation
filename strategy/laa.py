@@ -15,7 +15,11 @@
 
 import numpy as np
 import pandas as pd
+from pathlib import Path
+
 from strategy.common import InvestmentStrategy, Portfolio
+
+UNEMPLOYMENT_FRED_CSV_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=UNRATE"
 
 
 class Assets:
@@ -36,13 +40,45 @@ class InvestmentStrategyLAA(InvestmentStrategy):
     def get_assets(cls) -> set:
         return Assets.all()
 
+    def _load_unemployment(self) -> pd.DataFrame:
+        """
+        Returns a DataFrame with columns: Date, unemployment
+        - Prefers local ./input/unemployment.csv if present (backward compatible)
+        - Otherwise fetches UNRATE from FRED (no API key) and caches under .cache/
+        """
+        local_path = Path("./input/unemployment.csv")
+        cache_path = Path(".cache/unemployment_unrate.csv")
+
+        if local_path.exists():
+            df = pd.read_csv(local_path)
+        else:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            if cache_path.exists():
+                df = pd.read_csv(cache_path)
+            else:
+                df = pd.read_csv(UNEMPLOYMENT_FRED_CSV_URL)
+                df.to_csv(cache_path, index=False)
+
+        # Normalize to the schema used by the rest of the strategy
+        cols = {c.lower(): c for c in df.columns}
+        if "date" in cols and "unrate" in cols:
+            df = df.rename(columns={cols["date"]: "Date", cols["unrate"]: "unemployment"})
+        elif "observation_date" in cols and "unrate" in cols:
+            # FRED CSV commonly uses observation_date + UNRATE
+            df = df.rename(columns={cols["observation_date"]: "Date", cols["unrate"]: "unemployment"})
+        elif "reported" in cols and "value" in cols:
+            df = df.rename(columns={cols["reported"]: "Date", cols["value"]: "unemployment"})
+
+        if "Date" not in df.columns or "unemployment" not in df.columns:
+            raise ValueError(f"Unemployment data has unexpected columns: {list(df.columns)}")
+
+        df["Date"] = pd.to_datetime(df["Date"])
+        df["unemployment"] = pd.to_numeric(df["unemployment"], errors="coerce")
+        df = df.dropna(subset=["Date", "unemployment"]).sort_values("Date").reset_index(drop=True)
+        return df[["Date", "unemployment"]]
+
     def calc_portfolio(self) -> pd.Series:
-        unemployment = pd.read_csv(
-            "./input/unemployment.csv",
-            parse_dates=["reported"])
-        unemployment = unemployment.sort_values("reported")
-        unemployment = unemployment.reset_index(drop=True)
-        unemployment = unemployment.rename(columns={"reported": "Date", "value": "unemployment"})
+        unemployment = self._load_unemployment()
 
         spy_200_ma = self.chart["SPY"].rolling(window=200).mean().resample("ME").last()
         spy_200_ma = spy_200_ma.rename("spy_200_ma")
