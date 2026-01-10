@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 from datetime import datetime
+import json
 from pathlib import Path
 from zoneinfo import ZoneInfo
 import sys
@@ -29,6 +30,15 @@ class StrategyRun:
     label: str
     mode: str  # head|tail
     lookback: int
+
+
+@dataclass(frozen=True)
+class RunDiagnostics:
+    universe_size: int
+    valid_data_tickers: int
+    dropped_missing_lookback: int
+    dropped_extreme_change: int
+    picks: int
 
 
 def parse_args() -> argparse.Namespace:
@@ -95,13 +105,62 @@ def _select_ranked(
     if ranked.empty:
         return pd.DataFrame()
 
-    df = ranked.rename("lookback_return").to_frame().reset_index().rename(columns={"index": "ticker"})
+    # Robustly name the index column as "ticker" regardless of the Series index name.
+    df = ranked.rename("lookback_return").reset_index()
+    if df.shape[1] >= 2:
+        df.columns = ["ticker", "lookback_return"] + list(df.columns[2:])
     df.insert(0, "rank", range(1, len(df) + 1))
     df["lookback_price"] = start_px.loc[df["ticker"]].values
     df["current_price"] = end_px.loc[df["ticker"]].values
     df["lookback_date"] = window.index[0].date()
     df["current_date"] = window.index[-1].date()
     return df
+
+
+def _select_ranked_with_diagnostics(
+    prices: pd.DataFrame,
+    universe: list[str],
+    ref_date: pd.Timestamp,
+    lookback: int,
+    top: int,
+    mode: str,
+    max_daily_change: float,
+) -> tuple[pd.DataFrame, RunDiagnostics]:
+    window = prices.loc[:ref_date].tail(lookback + 1)
+    if len(window) < lookback + 1:
+        return (
+            pd.DataFrame(),
+            RunDiagnostics(
+                universe_size=len(universe),
+                valid_data_tickers=0,
+                dropped_missing_lookback=len(universe),
+                dropped_extreme_change=0,
+                picks=0,
+            ),
+        )
+
+    valid_missing = [c for c in universe if c in window.columns and window[c].notna().all()]
+    dropped_missing = max(0, len(universe) - len(valid_missing))
+
+    # lookback 구간 내 극단 일변동 필터
+    dropped_extreme = 0
+    valid_cols = list(valid_missing)
+    daily = window[valid_cols].pct_change(fill_method=None).iloc[1:].replace([np.inf, -np.inf], np.nan)
+    if not daily.empty and max_daily_change is not None:
+        mask_ok = daily.abs().max() <= max_daily_change
+        before = len(valid_cols)
+        valid_cols = [c for c in valid_cols if bool(mask_ok.get(c, False))]
+        dropped_extreme = max(0, before - len(valid_cols))
+
+    df = _select_ranked(prices, universe, ref_date, lookback, top, mode, max_daily_change)
+    diag = RunDiagnostics(
+        universe_size=len(universe),
+        valid_data_tickers=len(valid_missing),
+        dropped_missing_lookback=dropped_missing,
+        dropped_extreme_change=dropped_extreme,
+        picks=int(len(df)) if df is not None else 0,
+    )
+    return df, diag
 
 
 def _render_html(
@@ -128,22 +187,21 @@ def _render_html(
         out = out.rename(columns={"lookback_price": f"{lb_date:%Y-%m-%d}", "current_price": f"{cur_date:%Y-%m-%d}", "lookback_return": "LookbackReturn"})
         return out.to_html(index=False, escape=True, border=0)
 
+    # Keep CSS email-friendly: avoid position:fixed and sticky headers (often stripped by email clients).
     style = """
 <style>
 body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif; line-height: 1.35; margin: 0; }
-.container { margin-left: 230px; padding: 18px 24px 32px; }
-.sidebar { position: fixed; top: 12px; left: 12px; width: 200px; border: 1px solid #e5e5e5; border-radius: 8px; padding: 12px; background: #fbfbfb; }
-.sidebar h3 { margin: 0 0 8px; font-size: 14px; }
-.sidebar ul { list-style: none; padding-left: 0; margin: 0; }
-.sidebar li { margin: 4px 0; font-size: 13px; }
+.container { padding: 18px 24px 32px; }
 h1 { margin: 0 0 10px; }
 h2 { margin: 18px 0 8px; }
 h3 { margin: 12px 0 6px; }
 .meta { color: #555; font-size: 13px; margin-bottom: 8px; }
 table { border-collapse: collapse; width: 100%; max-width: 1000px; }
 th, td { padding: 6px 8px; border-bottom: 1px solid #e5e5e5; text-align: left; font-size: 13px; }
-th { background: #fafafa; position: sticky; top: 0; }
+th { background: #fafafa; }
 .section { margin-bottom: 22px; }
+.toc { font-size: 13px; margin: 10px 0 14px; }
+.toc a { text-decoration: none; }
 </style>
 """.strip()
 
@@ -153,16 +211,6 @@ th { background: #fafafa; position: sticky; top: 0; }
         "</head><body>",
     ]
 
-    # Sidebar TOC
-    parts.append("<div class='sidebar'>")
-    parts.append("<h3>목차</h3>")
-    parts.append("<ul>")
-    for run, _ in head_runs:
-        parts.append(f"<li><a href='#{_slug(run)}'>Head lk={run.lookback}</a></li>")
-    for run, _ in tail_runs:
-        parts.append(f"<li><a href='#{_slug(run)}'>Tail lk={run.lookback}</a></li>")
-    parts.append("</ul></div>")
-
     parts.append("<div class='container'>")
     parts.append("<h1>Daily Holdings (Rank Head/Tail)</h1>")
     parts.append(
@@ -170,6 +218,16 @@ th { background: #fafafa; position: sticky; top: 0; }
         f"Data date (latest close): {data_date.date().isoformat()}<br/>"
         f"Equal-weight universe pick, top={top}</div>"
     )
+
+    # TOC
+    parts.append("<div class='toc'><b>목차</b>: ")
+    toc_parts: list[str] = []
+    for run, _ in head_runs:
+        toc_parts.append(f"<a href='#{_slug(run)}'>Head lk={run.lookback}</a>")
+    for run, _ in tail_runs:
+        toc_parts.append(f"<a href='#{_slug(run)}'>Tail lk={run.lookback}</a>")
+    parts.append(" | ".join(toc_parts) if toc_parts else "-")
+    parts.append("</div>")
 
     head_lks = ", ".join(str(run.lookback) for run, _ in head_runs)
     tail_lks = ", ".join(str(run.lookback) for run, _ in tail_runs)
@@ -206,6 +264,96 @@ th { background: #fafafa; position: sticky; top: 0; }
 
     parts.append("</body></html>")
     return "\n".join(parts)
+
+
+def _safe_pct(x: float) -> str:
+    try:
+        if x is None or (isinstance(x, float) and np.isnan(x)):
+            return "NA"
+        return f"{float(x):+.2%}"
+    except Exception:
+        return "NA"
+
+
+def _safe_price(x: float) -> str:
+    try:
+        if x is None or (isinstance(x, float) and np.isnan(x)):
+            return "NA"
+        return f"{float(x):,.2f}"
+    except Exception:
+        return "NA"
+
+
+def _build_decision_notes(
+    asof_kst: datetime,
+    data_date: pd.Timestamp,
+    top: int,
+    head_runs: list[tuple[StrategyRun, pd.DataFrame]],
+    tail_runs: list[tuple[StrategyRun, pd.DataFrame]],
+    diag_rows: list[dict[str, object]],
+) -> str:
+    """
+    Human-readable notes explaining *why* tickers were selected (audit/validation).
+    """
+    diag_by_key: dict[tuple[str, int], dict[str, object]] = {}
+    for d in diag_rows:
+        try:
+            diag_by_key[(str(d["mode"]), int(d["lookback"]))] = d
+        except Exception:
+            continue
+
+    lines: list[str] = []
+    lines.append(f"As-of (KST): {asof_kst.strftime('%Y-%m-%d %H:%M %Z')}")
+    lines.append(f"Data date (latest close): {data_date.date().isoformat()}")
+    lines.append(f"Rule: select top={top} by lookback return; equal weight={1/top:.4%}" if top else "Rule: top=0 (invalid)")
+    lines.append("")
+    lines.append("Filters:")
+    lines.append("- Missing data: exclude tickers missing any price in the lookback window")
+    lines.append("- Extreme move: exclude tickers whose |daily return| exceeds max_daily_change during lookback")
+    lines.append("")
+
+    def _section(mode: str, runs: list[tuple[StrategyRun, pd.DataFrame]]) -> None:
+        title = "Head (Momentum)" if mode == "head" else "Tail (Reversal)"
+        lines.append(f"[{title}]")
+        if not runs:
+            lines.append("  (no runs)")
+            lines.append("")
+            return
+        for run, df in runs:
+            lines.append(f"- Run: mode={run.mode}, lookback={run.lookback}, top={top}")
+            diag = diag_by_key.get((run.mode, run.lookback))
+            if diag:
+                lines.append(
+                    "  Universe="
+                    + f"{diag.get('universe_size','NA')}, "
+                    + f"valid_data={diag.get('valid_data_tickers','NA')}, "
+                    + f"dropped_missing={diag.get('dropped_missing_lookback','NA')}, "
+                    + f"dropped_extreme={diag.get('dropped_extreme_change','NA')}, "
+                    + f"picks={diag.get('picks','NA')}"
+                )
+            if df is None or df.empty:
+                lines.append("  Picks: (none)")
+                lines.append("")
+                continue
+
+            # df columns: rank,ticker,lookback_price,current_price,lookback_return,lookback_date,current_date
+            lb_date = df["lookback_date"].iloc[0] if "lookback_date" in df.columns and not df.empty else "NA"
+            cur_date = df["current_date"].iloc[0] if "current_date" in df.columns and not df.empty else "NA"
+            lines.append(f"  Window: {lb_date} -> {cur_date}")
+            lines.append("  Picks:")
+            for _, row in df.iterrows():
+                lines.append(
+                    "    "
+                    + f"{int(row.get('rank', 0)):>3d}. {row.get('ticker')} "
+                    + f"ret={_safe_pct(row.get('lookback_return'))} "
+                    + f"px({lb_date})={_safe_price(row.get('lookback_price'))} "
+                    + f"px({cur_date})={_safe_price(row.get('current_price'))}"
+                )
+            lines.append("")
+
+    _section("head", head_runs)
+    _section("tail", tail_runs)
+    return "\n".join(lines).strip() + "\n"
 
 
 def main() -> None:
@@ -250,12 +398,18 @@ def main() -> None:
     out_root = Path(args.output_dir)
     out_dir = out_root / asof_kst.strftime("%Y%m%d")
     out_dir.mkdir(parents=True, exist_ok=True)
+    details_dir = out_dir / "details"
+    details_dir.mkdir(parents=True, exist_ok=True)
 
     records: list[dict[str, object]] = []
+    diag_rows: list[dict[str, object]] = []
     for run, df in head_runs + tail_runs:
         if df.empty:
             continue
         weight = 1.0 / float(args.top) if args.top else float("nan")
+        # Save per-run picks for audit/debug
+        pick_path = details_dir / f"picks_{run.mode}_lk{run.lookback}_top{args.top}.csv"
+        df.to_csv(pick_path, index=False)
         for _, row in df.iterrows():
             records.append(
                 {
@@ -275,6 +429,53 @@ def main() -> None:
                     "current_date": str(row["current_date"]),
                 }
             )
+
+        # Diagnostics for the run (counts)
+        df2, diag = _select_ranked_with_diagnostics(
+            prices=prices,
+            universe=universe,
+            ref_date=data_date,
+            lookback=run.lookback,
+            top=args.top,
+            mode=run.mode,
+            max_daily_change=args.max_daily_change,
+        )
+        _ = df2  # keep the function side-effect free; df already saved above
+        diag_rows.append(
+            {
+                "mode": run.mode,
+                "lookback": run.lookback,
+                "top": args.top,
+                "universe_size": diag.universe_size,
+                "valid_data_tickers": diag.valid_data_tickers,
+                "dropped_missing_lookback": diag.dropped_missing_lookback,
+                "dropped_extreme_change": diag.dropped_extreme_change,
+                "picks": diag.picks,
+                "max_daily_change": args.max_daily_change,
+            }
+        )
+
+    (details_dir / "meta.json").write_text(
+        json.dumps(
+            {
+                "asof_kst": asof_kst.strftime("%Y-%m-%d %H:%M:%S %Z"),
+                "data_date": data_date.date().isoformat(),
+                "top": args.top,
+                "head_lookbacks": head_lbs,
+                "tail_lookbacks": tail_lbs,
+                "max_daily_change": args.max_daily_change,
+                "universe_size": len(universe),
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    if diag_rows:
+        pd.DataFrame.from_records(diag_rows).sort_values(["mode", "lookback"]).to_csv(details_dir / "diagnostics.csv", index=False)
+
+    decision_notes = _build_decision_notes(asof_kst, data_date, args.top, head_runs, tail_runs, diag_rows)
+    (details_dir / "decision_notes.txt").write_text(decision_notes, encoding="utf-8")
 
     signals_path = out_dir / "signals.csv"
     signals_df = pd.DataFrame.from_records(records).sort_values(["mode", "lookback", "rank", "ticker"])
