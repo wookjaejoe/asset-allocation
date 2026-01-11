@@ -1,0 +1,83 @@
+name: daily-reports-email
+
+on:
+  workflow_dispatch: {}
+  # NOTE: Enable this schedule only if you disable the two separate daily workflows,
+  # otherwise you'll send duplicate emails.
+  # schedule:
+  #   # 08:00 KST = 23:00 UTC (previous day)
+  #   - cron: "0 23 * * *"
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache price data
+        uses: actions/cache@v4
+        with:
+          path: .cache
+          key: price-cache-${{ runner.os }}-${{ hashFiles('requirements-actions.txt') }}
+          restore-keys: |
+            price-cache-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-actions.txt
+
+      - name: Generate daily signals + email bodies
+        run: |
+          python scripts/daily_asset_allocation_report.py
+          python scripts/daily_rank_report.py \
+            --top 50 \
+            --head-lookbacks "60,120,250" \
+            --tail-lookbacks "10,20,40"
+
+      - name: Build combined email body (HTML)
+        shell: bash
+        run: |
+          TODAY_KST="$(TZ=Asia/Seoul date +%Y%m%d)"
+          python scripts/build_daily_combined_email.py --date "${TODAY_KST}"
+
+      - name: Send email (optional; requires SMTP_* + MAIL_*)
+        shell: bash
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          SMTP_STARTTLS: ${{ secrets.SMTP_STARTTLS }}
+          MAIL_FROM: ${{ secrets.MAIL_FROM }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+        run: |
+          if [[ -z "${SMTP_HOST}" || -z "${MAIL_FROM}" || -z "${MAIL_TO}" ]]; then
+            echo "SMTP secrets not configured; skipping send."
+            exit 0
+          fi
+          TODAY_KST="$(TZ=Asia/Seoul date +%Y%m%d)"
+          SUBJECT="[Daily] Reports (${TODAY_KST} 08:00 KST)"
+          python scripts/send_email_smtp.py \
+            --subject "${SUBJECT}" \
+            --html ".output/daily_reports/${TODAY_KST}/email.html" \
+            --attach ".output/daily/${TODAY_KST}/signals.csv" \
+            --attach ".output/daily/${TODAY_KST}/details/decision_notes.txt" \
+            --attach ".output/daily_asset_allocation/${TODAY_KST}/signals.csv" \
+            --attach ".output/daily_asset_allocation/${TODAY_KST}/details/decision_notes.txt"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-reports-output
+          path: |
+            .output/daily_reports
+            .output/daily
+            .output/daily_asset_allocation
+

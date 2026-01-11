@@ -15,6 +15,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--attach", action="append", default=[], help="Attachment path (repeatable)")
     p.add_argument("--to", default=os.getenv("MAIL_TO", ""), help="Comma-separated recipients (or MAIL_TO env)")
     p.add_argument("--from", dest="from_addr", default=os.getenv("MAIL_FROM", ""), help="From (or MAIL_FROM env)")
+    p.add_argument("--out-eml", default=None, help="Write the composed email to this .eml path instead of sending")
     return p.parse_args()
 
 
@@ -27,12 +28,6 @@ def _env_required(name: str) -> str:
 
 def main() -> None:
     args = parse_args()
-
-    host = _env_required("SMTP_HOST")
-    port = int(os.getenv("SMTP_PORT", "587"))
-    user = os.getenv("SMTP_USER", "").strip()
-    password = os.getenv("SMTP_PASS", "").strip()
-    use_starttls = os.getenv("SMTP_STARTTLS", "1").strip() not in {"0", "false", "False"}
 
     from_addr = args.from_addr.strip()
     to_addrs = [x.strip() for x in args.to.split(",") if x.strip()]
@@ -61,6 +56,18 @@ def main() -> None:
             maintype, subtype = mime.split("/", 1)
         msg.add_attachment(data, maintype=maintype, subtype=subtype, filename=path.name)
 
+    if args.out_eml:
+        out_path = Path(args.out_eml)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_bytes(msg.as_bytes())
+        return
+
+    host = _env_required("SMTP_HOST")
+    port = int(os.getenv("SMTP_PORT", "587"))
+    user = os.getenv("SMTP_USER", "").strip()
+    password = os.getenv("SMTP_PASS", "").strip()
+    use_starttls = os.getenv("SMTP_STARTTLS", "1").strip() not in {"0", "false", "False"}
+
     with smtplib.SMTP(host=host, port=port, timeout=30) as smtp:
         if use_starttls:
             smtp.starttls()
@@ -71,4 +78,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

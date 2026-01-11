@@ -30,6 +30,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--output", default=".output/rank_mix_backtest.csv", help="포트폴리오 수익률 저장 경로")
     p.add_argument("--monthly-output", default=".output/rank_mix_periods.csv", help="리밸런스 구간별 요약 저장 경로")
     p.add_argument("--report", default=".output/rank_mix_report.html", help="quantstats 리포트 경로")
+    p.add_argument("--cache-dir", default=".cache/sp500", help="가격 캐시 디렉토리 (S&P500용 권장: .cache/sp500)")
     return p.parse_args()
 
 
@@ -124,7 +125,7 @@ def run_backtest(args: argparse.Namespace):
         args.mid_lookback + args.exclude_recent_days + 1,
     )
     fetch_start = compute_fetch_start(args.start, required_lb)
-    prices = load_prices_with_cache(tickers, fetch_start, args.end)
+    prices = load_prices_with_cache(tickers, fetch_start, args.end, cache_dir=Path(args.cache_dir))
     if prices.empty:
         raise RuntimeError("Price data is empty.")
 

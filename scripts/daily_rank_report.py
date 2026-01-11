@@ -48,6 +48,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--tail-lookbacks", default="10,20,40", help="리버설 lookback 후보(영업일), 예: 10,20,40")
     p.add_argument("--max-daily-change", type=float, default=1.0, help="lookback 구간 내 일별수익률 절대값 상한(초과 시 제외)")
     p.add_argument("--output-dir", default=".output/daily", help="산출물 디렉토리")
+    p.add_argument("--cache-dir", default=".cache/sp500", help="가격 캐시 디렉토리 (S&P500용 권장: .cache/sp500)")
     p.add_argument("--asof-kst", default=None, help="메일 기준시각(KST, ISO8601). 기본 now.")
     return p.parse_args()
 
@@ -370,11 +371,15 @@ def main() -> None:
     max_lb = max(all_lbs) if all_lbs else 0
 
     history = SP500History()
-    raw_tickers = history.df["ticker"].unique().tolist()
-    tickers = [normalize_ticker(t) for t in raw_tickers]
+    # Daily report only needs the *current* S&P500 membership (not every historical constituent),
+    # which keeps the download/universe smaller and avoids lots of delisted tickers.
+    ref = pd.Timestamp.utcnow().normalize()
+    if getattr(ref, "tzinfo", None) is not None:
+        ref = ref.tz_localize(None)
+    tickers = [normalize_ticker(t) for t in history.constituents(ref)]
 
     fetch_start = _compute_fetch_start(max_lb + 1)
-    prices = load_prices_with_cache(tickers, fetch_start, end=None)
+    prices = load_prices_with_cache(tickers, fetch_start, end=None, cache_dir=Path(args.cache_dir))
     if prices.empty:
         raise RuntimeError("Price data is empty; cannot generate signals.")
 

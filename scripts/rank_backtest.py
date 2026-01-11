@@ -27,12 +27,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--output", default=".output/rank_backtest.csv", help="포트폴리오 수익률 저장 경로")
     p.add_argument("--monthly-output", default=".output/rank_monthly.csv", help="리밸런스 구간별 보유종목/수익률 저장 경로 (파일명은 기존 관례)")
     p.add_argument("--report", default=".output/rank_report.html", help="quantstats 리포트 경로")
+    p.add_argument("--cache-dir", default=".cache/sp500", help="가격 캐시 디렉토리 (S&P500용 권장: .cache/sp500)")
     return p.parse_args()
 
 
-def load_price_data(tickers: List[str], start: str, end: str | None) -> pd.DataFrame:
+def load_price_data(tickers: List[str], start: str, end: str | None, cache_dir: Path) -> pd.DataFrame:
     # 가격 데이터는 캐시를 우선 사용하고, staleness 정책(1시간 부분 업데이트, 1일 전체 재다운로드)에 따라 갱신한다.
-    prices = load_prices_with_cache(tickers, start, end)
+    prices = load_prices_with_cache(tickers, start, end, cache_dir=cache_dir)
     logger.info(f"Dropped all-NaN columns, remaining tickers: {len(prices.columns)}")
     logger.info(f"Price matrix shape: {prices.shape}")
     return prices
@@ -110,7 +111,7 @@ def run_backtest(args: argparse.Namespace) -> tuple[pd.Series, List[Dict[str, ob
         tickers.append("SPY")  # 벤치마크 비교용
 
     fetch_start = compute_fetch_start(args.start, args.lookback + 1)
-    prices = load_price_data(tickers, fetch_start, args.end)
+    prices = load_price_data(tickers, fetch_start, args.end, cache_dir=Path(args.cache_dir))
     if prices.empty:
         raise RuntimeError("Price data is empty; check date range or tickers.")
 

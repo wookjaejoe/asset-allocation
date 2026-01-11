@@ -7,6 +7,18 @@
 - output/final.html: 최종 전략 백테스트 결과
 - .output/daily/YYYYMMDD/: (Rank) 데일리 이메일 산출물 (`scripts/daily_rank_report.py`)
 - .output/daily_asset_allocation/YYYYMMDD/: (Asset Allocation) 데일리 이메일 산출물 (`scripts/daily_asset_allocation_report.py`)
+- .output/daily_reports/YYYYMMDD/: (Combined) 데일리 통합 이메일 산출물 (`scripts/build_daily_combined_email.py`)
+
+## Daily email (GitHub Actions)
+- 개별 워크플로:
+  - `.github/workflows/daily_rank_email.yml`
+  - `.github/workflows/daily_asset_allocation_email.yml`
+- 통합 워크플로(옵션): `.github/workflows/daily_reports_email.yml`
+  - 스케줄을 켜면 기존 2개 데일리 워크플로 스케줄은 꺼야 중복 발송을 피할 수 있습니다.
+
+### Required GitHub Secrets (SMTP)
+- `SMTP_HOST`, `SMTP_PORT`(기본 587), `SMTP_USER`, `SMTP_PASS`, `SMTP_STARTTLS`(기본 1)
+- `MAIL_FROM`, `MAIL_TO`(콤마로 여러 수신자 가능)
 
 
 ## Build
