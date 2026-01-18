@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -10,6 +11,28 @@ import pandas as pd
 
 
 KST = ZoneInfo("Asia/Seoul")
+
+
+def _read_text(path: Path) -> str:
+    """Read text file, return empty string if not exists."""
+    if not path.exists():
+        return ""
+    try:
+        return path.read_text(encoding="utf-8")
+    except Exception:
+        return ""
+
+
+def _csv_to_base64_data_uri(path: Path) -> str:
+    """Convert CSV file to base64 data URI for download link."""
+    if not path.exists():
+        return ""
+    try:
+        content = path.read_bytes()
+        b64 = base64.b64encode(content).decode("ascii")
+        return f"data:text/csv;base64,{b64}"
+    except Exception:
+        return ""
 
 
 def parse_args() -> argparse.Namespace:
@@ -75,9 +98,21 @@ def main() -> None:
 
     rank_signals_path = rank_root / "signals.csv"
     aa_signals_path = aa_root / "signals.csv"
+    
+    # Decision notes paths
+    rank_notes_path = rank_root / "details" / "decision_notes.txt"
+    aa_notes_path = aa_root / "details" / "decision_notes.txt"
 
     rank_df = _read_csv(rank_signals_path)
     aa_df = _read_csv(aa_signals_path)
+    
+    # Read decision notes
+    rank_notes = _read_text(rank_notes_path)
+    aa_notes = _read_text(aa_notes_path)
+    
+    # Create data URIs for CSV downloads
+    rank_csv_uri = _csv_to_base64_data_uri(rank_signals_path)
+    aa_csv_uri = _csv_to_base64_data_uri(aa_signals_path)
 
     # Meta (best-effort)
     asof_kst = None
@@ -126,6 +161,59 @@ code { background: #f6f8fa; padding: 1px 4px; border-radius: 4px; }
 .toc-section { margin: 4px 0; font-size: 13px; }
 .toc-section-title { font-weight: 500; color: #333; }
 .toc-items { margin-left: 20px; color: #666; font-size: 12px; }
+
+/* Collapsible notes section */
+.notes-section {
+    margin: 16px 0;
+    border: 1px solid #e5e5e5;
+    border-radius: 8px;
+    overflow: hidden;
+}
+.notes-header {
+    background: #f8f9fa;
+    padding: 10px 14px;
+    font-weight: 600;
+    font-size: 13px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.notes-header:hover { background: #f0f0f0; }
+.notes-content {
+    padding: 12px 14px;
+    background: #fafafa;
+    font-size: 12px;
+    font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+    white-space: pre-wrap;
+    line-height: 1.4;
+    max-height: 400px;
+    overflow-y: auto;
+}
+details summary { list-style: none; }
+details summary::-webkit-details-marker { display: none; }
+details[open] .notes-header { border-bottom: 1px solid #e5e5e5; }
+
+/* Download button */
+.download-btn {
+    display: inline-block;
+    background: #0066cc;
+    color: white !important;
+    padding: 6px 12px;
+    border-radius: 4px;
+    text-decoration: none;
+    font-size: 12px;
+    margin: 4px 4px 4px 0;
+}
+.download-btn:hover { background: #0052a3; }
+.downloads-section {
+    background: #f0f7ff;
+    border: 1px solid #b8d4f0;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin: 16px 0;
+}
+.downloads-title { font-weight: 600; font-size: 13px; margin-bottom: 8px; }
 </style>
 """.strip()
 
@@ -139,12 +227,11 @@ code { background: #f6f8fa; padding: 1px 4px; border-radius: 4px; }
         + f"KST folder: <code>{date}</code><br/>"
         + (f"As-of (KST): {asof_kst}<br/>" if asof_kst else "")
         + (f"Data date (latest close): {data_date}<br/>" if data_date else "")
-        + "Attachments: <code>signals.csv</code> (rank/asset allocation)"
         + "</div>",
     ]
 
     # Build TOC (visual guide only, no links)
-    toc_parts = ["<div class='toc'>", "<div class='toc-title'>📋 목차 (Table of Contents)</div>"]
+    toc_parts = ["<div class='toc'>", "<div class='toc-title'>목차 (Table of Contents)</div>"]
     
     # Asset Allocation
     toc_parts.append("<div class='toc-section'>")
@@ -165,6 +252,16 @@ code { background: #f6f8fa; padding: 1px 4px; border-radius: 4px; }
     if tail_lookbacks:
         lb_str = ", ".join([f"LB={lb}" for lb in tail_lookbacks])
         toc_parts.append(f"<div class='toc-items'>{lb_str}</div>")
+    toc_parts.append("</div>")
+    
+    # Decision Notes
+    toc_parts.append("<div class='toc-section'>")
+    toc_parts.append("<span class='toc-section-title'>4. Decision Notes (검산용)</span>")
+    toc_parts.append("</div>")
+    
+    # Downloads
+    toc_parts.append("<div class='toc-section'>")
+    toc_parts.append("<span class='toc-section-title'>5. Downloads (CSV)</span>")
     toc_parts.append("</div>")
     
     toc_parts.append("</div>")
@@ -242,6 +339,46 @@ code { background: #f6f8fa; padding: 1px 4px; border-radius: 4px; }
                 parts.append(f"<h3>Lookback = {lb} days</h3>")
                 parts.append(_table(block))
 
+    # Decision Notes section (collapsible)
+    parts.append("<h2>4. Decision Notes (검산용)</h2>")
+    parts.append("<p style='font-size: 13px; color: #666;'>각 전략이 왜 해당 종목을 선정했는지 상세 로직을 확인할 수 있습니다.</p>")
+    
+    if aa_notes.strip():
+        parts.append("<details class='notes-section'>")
+        parts.append("<summary><div class='notes-header'>Asset Allocation Decision Notes <span>▼</span></div></summary>")
+        escaped_aa = aa_notes.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        parts.append(f"<div class='notes-content'>{escaped_aa}</div>")
+        parts.append("</details>")
+    else:
+        parts.append("<p><i>Asset Allocation notes not available</i></p>")
+    
+    if rank_notes.strip():
+        parts.append("<details class='notes-section'>")
+        parts.append("<summary><div class='notes-header'>Rank (Head/Tail) Decision Notes <span>▼</span></div></summary>")
+        escaped_rank = rank_notes.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        parts.append(f"<div class='notes-content'>{escaped_rank}</div>")
+        parts.append("</details>")
+    else:
+        parts.append("<p><i>Rank decision notes not available</i></p>")
+    
+    # Downloads section (CSV data embedded as base64)
+    parts.append("<h2>5. Downloads (CSV)</h2>")
+    parts.append("<div class='downloads-section'>")
+    parts.append("<div class='downloads-title'>Signal CSV Files</div>")
+    parts.append("<p style='font-size: 12px; color: #555; margin: 0 0 8px;'>아래 버튼을 클릭하면 CSV 파일을 다운로드할 수 있습니다.</p>")
+    
+    if aa_csv_uri:
+        parts.append(f"<a class='download-btn' href='{aa_csv_uri}' download='asset_allocation_signals_{date}.csv'>Asset Allocation signals.csv</a>")
+    else:
+        parts.append("<span style='font-size: 12px; color: #999;'>Asset Allocation CSV not available</span>")
+    
+    if rank_csv_uri:
+        parts.append(f"<a class='download-btn' href='{rank_csv_uri}' download='rank_signals_{date}.csv'>Rank signals.csv</a>")
+    else:
+        parts.append("<span style='font-size: 12px; color: #999;'>Rank CSV not available</span>")
+    
+    parts.append("</div>")
+    
     parts.append("</div></body></html>")
 
     out_path = Path(args.out) if args.out else (Path(".output/daily_reports") / date / "email.html")

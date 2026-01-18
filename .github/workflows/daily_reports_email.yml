@@ -13,6 +13,11 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PYTHONPATH: ${{ github.workspace }}
+      # Backtest parameters (reduced set for daily runs)
+      HEAD_LOOKBACKS_CSV: "60,120,250"
+      TAIL_LOOKBACKS_CSV: "10,20,40"
+      TOPS_CSV: "50"
+      REBAL_MONTHS_CSV: "1,3,6"
     steps:
       - uses: actions/checkout@v4
 
@@ -41,6 +46,10 @@ jobs:
             --head-lookbacks "60,120,250" \
             --tail-lookbacks "10,20,40"
 
+      - name: Run rank backtests + analysis
+        run: |
+          bash scripts/run_rank_backtests.sh
+
       - name: Build combined email body (HTML)
         shell: bash
         run: |
@@ -67,10 +76,8 @@ jobs:
           python scripts/send_email_smtp.py \
             --subject "${SUBJECT}" \
             --html ".output/daily_reports/${TODAY_KST}/email.html" \
-            --attach ".output/daily/${TODAY_KST}/signals.csv" \
-            --attach ".output/daily/${TODAY_KST}/details/decision_notes.txt" \
-            --attach ".output/daily_asset_allocation/${TODAY_KST}/signals.csv" \
-            --attach ".output/daily_asset_allocation/${TODAY_KST}/details/decision_notes.txt"
+            --attach ".output/rank_summary.csv" \
+            --attach ".output/rank_analysis.html"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -80,4 +87,7 @@ jobs:
             .output/daily_reports
             .output/daily
             .output/daily_asset_allocation
+            .output/rank_summary.csv
+            .output/rank_summary.md
+            .output/rank_analysis.html
 
