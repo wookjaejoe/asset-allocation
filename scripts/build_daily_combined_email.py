@@ -122,17 +122,10 @@ code { background: #f6f8fa; padding: 1px 4px; border-radius: 4px; }
     padding: 14px 18px; 
     margin: 16px 0 24px; 
 }
-.toc-title { font-weight: 600; margin-bottom: 8px; font-size: 14px; }
-.toc-section { margin: 6px 0; }
+.toc-title { font-weight: 600; margin-bottom: 10px; font-size: 14px; }
+.toc-section { margin: 4px 0; font-size: 13px; }
 .toc-section-title { font-weight: 500; color: #333; }
-.toc-items { margin-left: 16px; font-size: 13px; }
-.toc-items a { color: #0066cc; text-decoration: none; margin-right: 12px; }
-.toc-items a:hover { text-decoration: underline; }
-
-/* Back to top link */
-.back-to-top { font-size: 12px; color: #666; margin-top: 8px; }
-.back-to-top a { color: #0066cc; text-decoration: none; }
-.back-to-top a:hover { text-decoration: underline; }
+.toc-items { margin-left: 20px; color: #666; font-size: 12px; }
 </style>
 """.strip()
 
@@ -141,7 +134,7 @@ code { background: #f6f8fa; padding: 1px 4px; border-radius: 4px; }
         style,
         "</head><body>",
         "<div class='container'>",
-        "<h1 id='top'>Daily Reports (Asset Allocation + Rank)</h1>",
+        "<h1>Daily Reports (Asset Allocation + Rank)</h1>",
         "<div class='meta'>"
         + f"KST folder: <code>{date}</code><br/>"
         + (f"As-of (KST): {asof_kst}<br/>" if asof_kst else "")
@@ -150,39 +143,35 @@ code { background: #f6f8fa; padding: 1px 4px; border-radius: 4px; }
         + "</div>",
     ]
 
-    # Build TOC
+    # Build TOC (visual guide only, no links)
     toc_parts = ["<div class='toc'>", "<div class='toc-title'>📋 목차 (Table of Contents)</div>"]
     
     # Asset Allocation
     toc_parts.append("<div class='toc-section'>")
-    toc_parts.append("<span class='toc-section-title'>1. </span><a href='#asset-allocation'>Asset Allocation (Integration)</a>")
+    toc_parts.append("<span class='toc-section-title'>1. Asset Allocation (Integration)</span>")
     toc_parts.append("</div>")
     
     # Head
     toc_parts.append("<div class='toc-section'>")
-    toc_parts.append("<span class='toc-section-title'>2. </span><a href='#head'>Head (Momentum)</a>")
+    toc_parts.append("<span class='toc-section-title'>2. Head (Momentum)</span>")
     if head_lookbacks:
-        toc_parts.append("<div class='toc-items'>")
-        for lb in head_lookbacks:
-            toc_parts.append(f"<a href='#head-lb{lb}'>LB={lb}</a>")
-        toc_parts.append("</div>")
+        lb_str = ", ".join([f"LB={lb}" for lb in head_lookbacks])
+        toc_parts.append(f"<div class='toc-items'>{lb_str}</div>")
     toc_parts.append("</div>")
     
     # Tail
     toc_parts.append("<div class='toc-section'>")
-    toc_parts.append("<span class='toc-section-title'>3. </span><a href='#tail'>Tail (Reversal)</a>")
+    toc_parts.append("<span class='toc-section-title'>3. Tail (Reversal)</span>")
     if tail_lookbacks:
-        toc_parts.append("<div class='toc-items'>")
-        for lb in tail_lookbacks:
-            toc_parts.append(f"<a href='#tail-lb{lb}'>LB={lb}</a>")
-        toc_parts.append("</div>")
+        lb_str = ", ".join([f"LB={lb}" for lb in tail_lookbacks])
+        toc_parts.append(f"<div class='toc-items'>{lb_str}</div>")
     toc_parts.append("</div>")
     
     toc_parts.append("</div>")
     parts.extend(toc_parts)
 
     # Asset allocation section
-    parts.append("<h2 id='asset-allocation'>1. Asset Allocation (Integration)</h2>")
+    parts.append("<h2>1. Asset Allocation (Integration)</h2>")
     if aa_df.empty:
         parts.append(f"<p><i>Missing: {aa_signals_path}</i></p>")
     else:
@@ -195,13 +184,12 @@ code { background: #f6f8fa; padding: 1px 4px; border-radius: 4px; }
         if cols:
             view = view[cols]
         parts.append(_table(view))
-    parts.append("<div class='back-to-top'><a href='#top'>↑ 목차로</a></div>")
 
     # Rank section
     if rank_df.empty:
-        parts.append("<h2 id='head'>2. Head (Momentum)</h2>")
+        parts.append("<h2>2. Head (Momentum)</h2>")
         parts.append(f"<p><i>Missing: {rank_signals_path}</i></p>")
-        parts.append("<h2 id='tail'>3. Tail (Reversal)</h2>")
+        parts.append("<h2>3. Tail (Reversal)</h2>")
         parts.append(f"<p><i>Missing: {rank_signals_path}</i></p>")
     else:
         view = rank_df.copy()
@@ -218,7 +206,7 @@ code { background: #f6f8fa; padding: 1px 4px; border-radius: 4px; }
         for mode in ["head", "tail"]:
             sub = view[view.get("mode", pd.Series(dtype=object)) == mode] if "mode" in view.columns else pd.DataFrame()
             title = "Head (Momentum)" if mode == "head" else "Tail (Reversal)"
-            parts.append(f"<h2 id='{mode}'>{section_num}. {title}</h2>")
+            parts.append(f"<h2>{section_num}. {title}</h2>")
             section_num += 1
             
             if sub.empty:
@@ -251,10 +239,8 @@ code { background: #f6f8fa; padding: 1px 4px; border-radius: 4px; }
                 block = block[[c for c in display_cols if c in block.columns]]
                 block = block.rename(columns=rename_map)
                 
-                parts.append(f"<h3 id='{mode}-lb{lb}'>Lookback = {lb} days</h3>")
+                parts.append(f"<h3>Lookback = {lb} days</h3>")
                 parts.append(_table(block))
-            
-            parts.append("<div class='back-to-top'><a href='#top'>↑ 목차로</a></div>")
 
     parts.append("</div></body></html>")
 
