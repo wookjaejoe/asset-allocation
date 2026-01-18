@@ -92,64 +92,56 @@ def main() -> None:
             val = str(df["data_date"].dropna().iloc[0]) if df["data_date"].dropna().shape[0] else ""
             data_date = val or None
 
+    # Pre-compute lookbacks for TOC
+    head_lookbacks = []
+    tail_lookbacks = []
+    if not rank_df.empty and "mode" in rank_df.columns and "lookback" in rank_df.columns:
+        head_sub = rank_df[rank_df["mode"] == "head"]
+        tail_sub = rank_df[rank_df["mode"] == "tail"]
+        head_lookbacks = sorted({int(x) for x in head_sub["lookback"].dropna().tolist()})
+        tail_lookbacks = sorted({int(x) for x in tail_sub["lookback"].dropna().tolist()})
+
     style = """
 <style>
 body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif; line-height: 1.35; margin: 0; }
 .container { padding: 18px 24px 32px; }
 h1 { margin: 0 0 10px; }
-h2 { margin: 18px 0 8px; }
-h3 { margin: 12px 0 6px; }
+h2 { margin: 24px 0 8px; padding-top: 8px; border-top: 2px solid #e5e5e5; }
+h3 { margin: 16px 0 6px; }
 .meta { color: #555; font-size: 13px; margin-bottom: 10px; }
 .data-table { border-collapse: collapse; width: 100%; max-width: 1100px; }
 .data-table th, .data-table td { padding: 6px 8px; border-bottom: 1px solid #e5e5e5; text-align: left; font-size: 13px; }
 .data-table th { background: #fafafa; }
 code { background: #f6f8fa; padding: 1px 4px; border-radius: 4px; }
 
-/* Tab styles */
-.tab-container { margin: 16px 0; }
-.tab-buttons { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 2px solid #e5e5e5; padding-bottom: 0; }
-.tab-btn { 
-    padding: 8px 16px; 
+/* TOC styles */
+.toc { 
+    background: #f8f9fa; 
     border: 1px solid #e5e5e5; 
-    border-bottom: none;
-    background: #f8f8f8; 
-    cursor: pointer; 
-    font-size: 13px;
-    border-radius: 6px 6px 0 0;
-    margin-bottom: -2px;
-    transition: background 0.2s;
+    border-radius: 8px; 
+    padding: 14px 18px; 
+    margin: 16px 0 24px; 
 }
-.tab-btn:hover { background: #eee; }
-.tab-btn.active { 
-    background: #fff; 
-    border-bottom: 2px solid #fff;
-    font-weight: 600;
-    color: #0066cc;
-}
-.tab-content { display: none; padding: 16px 0; }
-.tab-content.active { display: block; }
-</style>
-""".strip()
+.toc-title { font-weight: 600; margin-bottom: 8px; font-size: 14px; }
+.toc-section { margin: 6px 0; }
+.toc-section-title { font-weight: 500; color: #333; }
+.toc-items { margin-left: 16px; font-size: 13px; }
+.toc-items a { color: #0066cc; text-decoration: none; margin-right: 12px; }
+.toc-items a:hover { text-decoration: underline; }
 
-    script = """
-<script>
-function showTab(containerId, tabId) {
-    const container = document.getElementById(containerId);
-    container.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
-    container.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
-    document.getElementById(tabId).classList.add('active');
-    container.querySelector('[data-tab="' + tabId + '"]').classList.add('active');
-}
-</script>
+/* Back to top link */
+.back-to-top { font-size: 12px; color: #666; margin-top: 8px; }
+.back-to-top a { color: #0066cc; text-decoration: none; }
+.back-to-top a:hover { text-decoration: underline; }
+</style>
 """.strip()
 
     parts: list[str] = [
         "<html><head><meta charset='utf-8'/>",
         style,
-        script,
         "</head><body>",
         "<div class='container'>",
-        "<h1>Daily Reports (Asset Allocation + Rank)</h1>",
+        "<h1 id='top'>Daily Reports (Asset Allocation + Rank)</h1>",
         "<div class='meta'>"
         + f"KST folder: <code>{date}</code><br/>"
         + (f"As-of (KST): {asof_kst}<br/>" if asof_kst else "")
@@ -158,8 +150,39 @@ function showTab(containerId, tabId) {
         + "</div>",
     ]
 
+    # Build TOC
+    toc_parts = ["<div class='toc'>", "<div class='toc-title'>📋 목차 (Table of Contents)</div>"]
+    
+    # Asset Allocation
+    toc_parts.append("<div class='toc-section'>")
+    toc_parts.append("<span class='toc-section-title'>1. </span><a href='#asset-allocation'>Asset Allocation (Integration)</a>")
+    toc_parts.append("</div>")
+    
+    # Head
+    toc_parts.append("<div class='toc-section'>")
+    toc_parts.append("<span class='toc-section-title'>2. </span><a href='#head'>Head (Momentum)</a>")
+    if head_lookbacks:
+        toc_parts.append("<div class='toc-items'>")
+        for lb in head_lookbacks:
+            toc_parts.append(f"<a href='#head-lb{lb}'>LB={lb}</a>")
+        toc_parts.append("</div>")
+    toc_parts.append("</div>")
+    
+    # Tail
+    toc_parts.append("<div class='toc-section'>")
+    toc_parts.append("<span class='toc-section-title'>3. </span><a href='#tail'>Tail (Reversal)</a>")
+    if tail_lookbacks:
+        toc_parts.append("<div class='toc-items'>")
+        for lb in tail_lookbacks:
+            toc_parts.append(f"<a href='#tail-lb{lb}'>LB={lb}</a>")
+        toc_parts.append("</div>")
+    toc_parts.append("</div>")
+    
+    toc_parts.append("</div>")
+    parts.extend(toc_parts)
+
     # Asset allocation section
-    parts.append("<h2>Asset Allocation (Integration)</h2>")
+    parts.append("<h2 id='asset-allocation'>1. Asset Allocation (Integration)</h2>")
     if aa_df.empty:
         parts.append(f"<p><i>Missing: {aa_signals_path}</i></p>")
     else:
@@ -172,10 +195,13 @@ function showTab(containerId, tabId) {
         if cols:
             view = view[cols]
         parts.append(_table(view))
+    parts.append("<div class='back-to-top'><a href='#top'>↑ 목차로</a></div>")
 
-    # Rank section with tabs
-    parts.append("<h2>Rank (Head/Tail)</h2>")
+    # Rank section
     if rank_df.empty:
+        parts.append("<h2 id='head'>2. Head (Momentum)</h2>")
+        parts.append(f"<p><i>Missing: {rank_signals_path}</i></p>")
+        parts.append("<h2 id='tail'>3. Tail (Reversal)</h2>")
         parts.append(f"<p><i>Missing: {rank_signals_path}</i></p>")
     else:
         view = rank_df.copy()
@@ -188,90 +214,47 @@ function showTab(containerId, tabId) {
         if "lookback_return" in view.columns:
             view["lookback_return"] = view["lookback_return"].map(lambda x: _fmt_pct(x, 2))
 
+        section_num = 2
         for mode in ["head", "tail"]:
             sub = view[view.get("mode", pd.Series(dtype=object)) == mode] if "mode" in view.columns else pd.DataFrame()
             title = "Head (Momentum)" if mode == "head" else "Tail (Reversal)"
-            parts.append(f"<h3>{title}</h3>")
+            parts.append(f"<h2 id='{mode}'>{section_num}. {title}</h2>")
+            section_num += 1
+            
             if sub.empty:
                 parts.append("<p><i>No rows</i></p>")
                 continue
             
             lookbacks = sorted({int(x) for x in sub.get("lookback", pd.Series(dtype=float)).dropna().tolist()})
             
-            if len(lookbacks) <= 1:
-                # No tabs needed for single lookback
-                for lb in lookbacks:
-                    block = sub[sub["lookback"] == lb].copy()
-                    block = block.sort_values(["rank", "ticker"])
-                    
-                    # Get dates for column renaming
-                    lookback_date_val = block["lookback_date"].iloc[0] if "lookback_date" in block.columns and not block.empty else "Lookback"
-                    current_date_val = block["current_date"].iloc[0] if "current_date" in block.columns and not block.empty else "Current"
-                    
-                    # Build display dataframe with date column names
-                    display_cols = ["rank", "ticker"]
-                    rename_map = {}
-                    if "lookback_price" in block.columns:
-                        display_cols.append("lookback_price")
-                        rename_map["lookback_price"] = str(lookback_date_val)
-                    if "current_price" in block.columns:
-                        display_cols.append("current_price")
-                        rename_map["current_price"] = str(current_date_val)
-                    if "lookback_return" in block.columns:
-                        display_cols.append("lookback_return")
-                        rename_map["lookback_return"] = "Return"
-                    
-                    block = block[[c for c in display_cols if c in block.columns]]
-                    block = block.rename(columns=rename_map)
-                    
-                    parts.append(f"<div class='meta'>lookback={lb} business days</div>")
-                    parts.append(_table(block))
-            else:
-                # Use tabs for multiple lookbacks
-                container_id = f"tabs-{mode}"
-                parts.append(f"<div class='tab-container' id='{container_id}'>")
+            for lb in lookbacks:
+                block = sub[sub["lookback"] == lb].copy()
+                block = block.sort_values(["rank", "ticker"])
                 
-                # Tab buttons
-                parts.append("<div class='tab-buttons'>")
-                for i, lb in enumerate(lookbacks):
-                    active_class = " active" if i == 0 else ""
-                    tab_id = f"tab-{mode}-{lb}"
-                    parts.append(f"<button class='tab-btn{active_class}' data-tab='{tab_id}' onclick=\"showTab('{container_id}', '{tab_id}')\">LB={lb}</button>")
-                parts.append("</div>")
+                # Get dates for column renaming
+                lookback_date_val = block["lookback_date"].iloc[0] if "lookback_date" in block.columns and not block.empty else "Lookback"
+                current_date_val = block["current_date"].iloc[0] if "current_date" in block.columns and not block.empty else "Current"
                 
-                # Tab contents
-                for i, lb in enumerate(lookbacks):
-                    active_class = " active" if i == 0 else ""
-                    tab_id = f"tab-{mode}-{lb}"
-                    block = sub[sub["lookback"] == lb].copy()
-                    block = block.sort_values(["rank", "ticker"])
-                    
-                    # Get dates for column renaming
-                    lookback_date_val = block["lookback_date"].iloc[0] if "lookback_date" in block.columns and not block.empty else "Lookback"
-                    current_date_val = block["current_date"].iloc[0] if "current_date" in block.columns and not block.empty else "Current"
-                    
-                    # Build display dataframe with date column names
-                    display_cols = ["rank", "ticker"]
-                    rename_map = {}
-                    if "lookback_price" in block.columns:
-                        display_cols.append("lookback_price")
-                        rename_map["lookback_price"] = str(lookback_date_val)
-                    if "current_price" in block.columns:
-                        display_cols.append("current_price")
-                        rename_map["current_price"] = str(current_date_val)
-                    if "lookback_return" in block.columns:
-                        display_cols.append("lookback_return")
-                        rename_map["lookback_return"] = "Return"
-                    
-                    block = block[[c for c in display_cols if c in block.columns]]
-                    block = block.rename(columns=rename_map)
-                    
-                    parts.append(f"<div class='tab-content{active_class}' id='{tab_id}'>")
-                    parts.append(f"<div class='meta'>lookback={lb} business days</div>")
-                    parts.append(_table(block))
-                    parts.append("</div>")
+                # Build display dataframe with date column names
+                display_cols = ["rank", "ticker"]
+                rename_map = {}
+                if "lookback_price" in block.columns:
+                    display_cols.append("lookback_price")
+                    rename_map["lookback_price"] = str(lookback_date_val)
+                if "current_price" in block.columns:
+                    display_cols.append("current_price")
+                    rename_map["current_price"] = str(current_date_val)
+                if "lookback_return" in block.columns:
+                    display_cols.append("lookback_return")
+                    rename_map["lookback_return"] = "Return"
                 
-                parts.append("</div>")  # close tab-container
+                block = block[[c for c in display_cols if c in block.columns]]
+                block = block.rename(columns=rename_map)
+                
+                parts.append(f"<h3 id='{mode}-lb{lb}'>Lookback = {lb} days</h3>")
+                parts.append(_table(block))
+            
+            parts.append("<div class='back-to-top'><a href='#top'>↑ 목차로</a></div>")
 
     parts.append("</div></body></html>")
 
