@@ -37,7 +37,7 @@ jobs:
         run: |
           python scripts/daily_asset_allocation_report.py
           python scripts/daily_rank_report.py \
-            --top 50 \
+            --top 20 \
             --head-lookbacks "60,120,250" \
             --tail-lookbacks "10,20,40"
 

@@ -34,7 +34,7 @@ jobs:
       - name: Generate daily signals + email body
         run: |
           python scripts/daily_rank_report.py \
-            --top 50 \
+            --top 20 \
             --head-lookbacks "60,120,250" \
             --tail-lookbacks "10,20,40"
 

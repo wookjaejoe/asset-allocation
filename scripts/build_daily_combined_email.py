@@ -104,12 +104,49 @@ h3 { margin: 12px 0 6px; }
 .data-table th, .data-table td { padding: 6px 8px; border-bottom: 1px solid #e5e5e5; text-align: left; font-size: 13px; }
 .data-table th { background: #fafafa; }
 code { background: #f6f8fa; padding: 1px 4px; border-radius: 4px; }
+
+/* Tab styles */
+.tab-container { margin: 16px 0; }
+.tab-buttons { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 2px solid #e5e5e5; padding-bottom: 0; }
+.tab-btn { 
+    padding: 8px 16px; 
+    border: 1px solid #e5e5e5; 
+    border-bottom: none;
+    background: #f8f8f8; 
+    cursor: pointer; 
+    font-size: 13px;
+    border-radius: 6px 6px 0 0;
+    margin-bottom: -2px;
+    transition: background 0.2s;
+}
+.tab-btn:hover { background: #eee; }
+.tab-btn.active { 
+    background: #fff; 
+    border-bottom: 2px solid #fff;
+    font-weight: 600;
+    color: #0066cc;
+}
+.tab-content { display: none; padding: 16px 0; }
+.tab-content.active { display: block; }
 </style>
+""".strip()
+
+    script = """
+<script>
+function showTab(containerId, tabId) {
+    const container = document.getElementById(containerId);
+    container.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+    container.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+    document.getElementById(tabId).classList.add('active');
+    container.querySelector('[data-tab="' + tabId + '"]').classList.add('active');
+}
+</script>
 """.strip()
 
     parts: list[str] = [
         "<html><head><meta charset='utf-8'/>",
         style,
+        script,
         "</head><body>",
         "<div class='container'>",
         "<h1>Daily Reports (Asset Allocation + Rank)</h1>",
@@ -136,18 +173,20 @@ code { background: #f6f8fa; padding: 1px 4px; border-radius: 4px; }
             view = view[cols]
         parts.append(_table(view))
 
-    # Rank section
+    # Rank section with tabs
     parts.append("<h2>Rank (Head/Tail)</h2>")
     if rank_df.empty:
         parts.append(f"<p><i>Missing: {rank_signals_path}</i></p>")
     else:
         view = rank_df.copy()
-        if "lookback_return" in view.columns:
-            view["lookback_return"] = view["lookback_return"].map(lambda x: _fmt_pct(x, 2))
+        
+        # Format prices
         if "lookback_price" in view.columns:
             view["lookback_price"] = view["lookback_price"].map(_fmt_price)
         if "current_price" in view.columns:
             view["current_price"] = view["current_price"].map(_fmt_price)
+        if "lookback_return" in view.columns:
+            view["lookback_return"] = view["lookback_return"].map(lambda x: _fmt_pct(x, 2))
 
         for mode in ["head", "tail"]:
             sub = view[view.get("mode", pd.Series(dtype=object)) == mode] if "mode" in view.columns else pd.DataFrame()
@@ -156,14 +195,83 @@ code { background: #f6f8fa; padding: 1px 4px; border-radius: 4px; }
             if sub.empty:
                 parts.append("<p><i>No rows</i></p>")
                 continue
-            for lb in sorted({int(x) for x in sub.get("lookback", pd.Series(dtype=float)).dropna().tolist()}):
-                block = sub[sub["lookback"] == lb].copy()
-                block = block.sort_values(["rank", "ticker"])
-                cols = [c for c in ["rank", "ticker", "lookback_return", "lookback_price", "current_price"] if c in block.columns]
-                if cols:
-                    block = block[cols]
-                parts.append(f"<div class='meta'>lookback={lb} business days</div>")
-                parts.append(_table(block))
+            
+            lookbacks = sorted({int(x) for x in sub.get("lookback", pd.Series(dtype=float)).dropna().tolist()})
+            
+            if len(lookbacks) <= 1:
+                # No tabs needed for single lookback
+                for lb in lookbacks:
+                    block = sub[sub["lookback"] == lb].copy()
+                    block = block.sort_values(["rank", "ticker"])
+                    
+                    # Get dates for column renaming
+                    lookback_date_val = block["lookback_date"].iloc[0] if "lookback_date" in block.columns and not block.empty else "Lookback"
+                    current_date_val = block["current_date"].iloc[0] if "current_date" in block.columns and not block.empty else "Current"
+                    
+                    # Build display dataframe with date column names
+                    display_cols = ["rank", "ticker"]
+                    rename_map = {}
+                    if "lookback_price" in block.columns:
+                        display_cols.append("lookback_price")
+                        rename_map["lookback_price"] = str(lookback_date_val)
+                    if "current_price" in block.columns:
+                        display_cols.append("current_price")
+                        rename_map["current_price"] = str(current_date_val)
+                    if "lookback_return" in block.columns:
+                        display_cols.append("lookback_return")
+                        rename_map["lookback_return"] = "Return"
+                    
+                    block = block[[c for c in display_cols if c in block.columns]]
+                    block = block.rename(columns=rename_map)
+                    
+                    parts.append(f"<div class='meta'>lookback={lb} business days</div>")
+                    parts.append(_table(block))
+            else:
+                # Use tabs for multiple lookbacks
+                container_id = f"tabs-{mode}"
+                parts.append(f"<div class='tab-container' id='{container_id}'>")
+                
+                # Tab buttons
+                parts.append("<div class='tab-buttons'>")
+                for i, lb in enumerate(lookbacks):
+                    active_class = " active" if i == 0 else ""
+                    tab_id = f"tab-{mode}-{lb}"
+                    parts.append(f"<button class='tab-btn{active_class}' data-tab='{tab_id}' onclick=\"showTab('{container_id}', '{tab_id}')\">LB={lb}</button>")
+                parts.append("</div>")
+                
+                # Tab contents
+                for i, lb in enumerate(lookbacks):
+                    active_class = " active" if i == 0 else ""
+                    tab_id = f"tab-{mode}-{lb}"
+                    block = sub[sub["lookback"] == lb].copy()
+                    block = block.sort_values(["rank", "ticker"])
+                    
+                    # Get dates for column renaming
+                    lookback_date_val = block["lookback_date"].iloc[0] if "lookback_date" in block.columns and not block.empty else "Lookback"
+                    current_date_val = block["current_date"].iloc[0] if "current_date" in block.columns and not block.empty else "Current"
+                    
+                    # Build display dataframe with date column names
+                    display_cols = ["rank", "ticker"]
+                    rename_map = {}
+                    if "lookback_price" in block.columns:
+                        display_cols.append("lookback_price")
+                        rename_map["lookback_price"] = str(lookback_date_val)
+                    if "current_price" in block.columns:
+                        display_cols.append("current_price")
+                        rename_map["current_price"] = str(current_date_val)
+                    if "lookback_return" in block.columns:
+                        display_cols.append("lookback_return")
+                        rename_map["lookback_return"] = "Return"
+                    
+                    block = block[[c for c in display_cols if c in block.columns]]
+                    block = block.rename(columns=rename_map)
+                    
+                    parts.append(f"<div class='tab-content{active_class}' id='{tab_id}'>")
+                    parts.append(f"<div class='meta'>lookback={lb} business days</div>")
+                    parts.append(_table(block))
+                    parts.append("</div>")
+                
+                parts.append("</div>")  # close tab-container
 
     parts.append("</div></body></html>")
 
@@ -175,4 +283,3 @@ code { background: #f6f8fa; padding: 1px 4px; border-radius: 4px; }
 
 if __name__ == "__main__":
     main()
-
