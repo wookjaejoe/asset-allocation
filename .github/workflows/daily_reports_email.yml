@@ -81,9 +81,7 @@ jobs:
           python scripts/send_email_smtp.py \
             --subject "${SUBJECT}" \
             --html ".output/daily_reports/${TODAY_KST}/email.html" \
-            --attach ".output/rank_summary.csv" \
             --attach ".output/rank_analysis.html" \
-            --attach ".output/asset_allocation/summary.csv" \
             --attach ".output/aa_analysis.html"
 
       - name: Upload artifacts

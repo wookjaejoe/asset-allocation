@@ -162,37 +162,20 @@ code { background: #f6f8fa; padding: 1px 4px; border-radius: 4px; }
 .toc-section-title { font-weight: 500; color: #333; }
 .toc-items { margin-left: 20px; color: #666; font-size: 12px; }
 
-/* Collapsible notes section */
-.notes-section {
-    margin: 16px 0;
+/* Notes section - code format */
+.notes-content {
+    margin: 12px 0;
+    padding: 12px 14px;
+    background: #f6f8fa;
     border: 1px solid #e5e5e5;
     border-radius: 8px;
-    overflow: hidden;
-}
-.notes-header {
-    background: #f8f9fa;
-    padding: 10px 14px;
-    font-weight: 600;
-    font-size: 13px;
-    cursor: pointer;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-.notes-header:hover { background: #f0f0f0; }
-.notes-content {
-    padding: 12px 14px;
-    background: #fafafa;
     font-size: 12px;
     font-family: 'SF Mono', Monaco, 'Courier New', monospace;
     white-space: pre-wrap;
     line-height: 1.4;
-    max-height: 400px;
+    max-height: 500px;
     overflow-y: auto;
 }
-details summary { list-style: none; }
-details summary::-webkit-details-marker { display: none; }
-details[open] .notes-header { border-bottom: 1px solid #e5e5e5; }
 
 /* Download button */
 .download-btn {
@@ -339,25 +322,21 @@ details[open] .notes-header { border-bottom: 1px solid #e5e5e5; }
                 parts.append(f"<h3>Lookback = {lb} days</h3>")
                 parts.append(_table(block))
 
-    # Decision Notes section (collapsible)
+    # Decision Notes section (plain code format)
     parts.append("<h2>4. Decision Notes (검산용)</h2>")
     parts.append("<p style='font-size: 13px; color: #666;'>각 전략이 왜 해당 종목을 선정했는지 상세 로직을 확인할 수 있습니다.</p>")
     
     if aa_notes.strip():
-        parts.append("<details class='notes-section'>")
-        parts.append("<summary><div class='notes-header'>Asset Allocation Decision Notes <span>▼</span></div></summary>")
+        parts.append("<h3>Asset Allocation Decision Notes</h3>")
         escaped_aa = aa_notes.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        parts.append(f"<div class='notes-content'>{escaped_aa}</div>")
-        parts.append("</details>")
+        parts.append(f"<pre class='notes-content'>{escaped_aa}</pre>")
     else:
         parts.append("<p><i>Asset Allocation notes not available</i></p>")
     
     if rank_notes.strip():
-        parts.append("<details class='notes-section'>")
-        parts.append("<summary><div class='notes-header'>Rank (Head/Tail) Decision Notes <span>▼</span></div></summary>")
+        parts.append("<h3>Rank (Head/Tail) Decision Notes</h3>")
         escaped_rank = rank_notes.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-        parts.append(f"<div class='notes-content'>{escaped_rank}</div>")
-        parts.append("</details>")
+        parts.append(f"<pre class='notes-content'>{escaped_rank}</pre>")
     else:
         parts.append("<p><i>Rank decision notes not available</i></p>")
     
