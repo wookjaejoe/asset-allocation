@@ -43,12 +43,17 @@ jobs:
           python scripts/daily_asset_allocation_report.py
           python scripts/daily_rank_report.py \
             --top 20 \
-            --head-lookbacks "60,120,250" \
-            --tail-lookbacks "10,20,40"
+            --head-lookbacks "120,252" \
+            --tail-lookbacks "5,10"
 
       - name: Run rank backtests + analysis
         run: |
           bash scripts/run_rank_backtests.sh
+
+      - name: Run asset allocation backtests + analysis
+        run: |
+          bash scripts/run_aa_backtests.sh
+          python scripts/analyze_aa_summary.py
 
       - name: Build combined email body (HTML)
         shell: bash
@@ -77,7 +82,9 @@ jobs:
             --subject "${SUBJECT}" \
             --html ".output/daily_reports/${TODAY_KST}/email.html" \
             --attach ".output/rank_summary.csv" \
-            --attach ".output/rank_analysis.html"
+            --attach ".output/rank_analysis.html" \
+            --attach ".output/asset_allocation/summary.csv" \
+            --attach ".output/aa_analysis.html"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -90,4 +97,6 @@ jobs:
             .output/rank_summary.csv
             .output/rank_summary.md
             .output/rank_analysis.html
+            .output/asset_allocation
+            .output/aa_analysis.html
 
