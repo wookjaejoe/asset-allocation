@@ -8,8 +8,8 @@ set -euo pipefail
 # - 모멘텀(head): 중기(6~12개월, 약 126~252 거래일)에서 효과적
 # - 리버설(tail): 단기(1주~1개월, 약 5~21 거래일)에서 효과적
 LOOKBACKS_CSV_DEFAULT="20,60,120,252"
-HEAD_LOOKBACKS_CSV_DEFAULT="60,120,252"  # 모멘텀용: 중기 위주
-TAIL_LOOKBACKS_CSV_DEFAULT="5,10,20,60"  # 리버설용: 단기 위주
+HEAD_LOOKBACKS_CSV_DEFAULT="252,120,60"  # 모멘텀용: 긴 lookback 먼저 (캐시 효율)
+TAIL_LOOKBACKS_CSV_DEFAULT="60,20,10,5"  # 리버설용: 긴 lookback 먼저 (캐시 효율)
 MODES_CSV_DEFAULT="head,tail"
 TOPS_CSV_DEFAULT="25,50"  # S&P500의 5%~10% 수준
 REBAL_MONTHS_CSV_DEFAULT="1,3,6"

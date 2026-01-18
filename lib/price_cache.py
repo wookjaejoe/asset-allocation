@@ -47,12 +47,40 @@ class CacheMeta:
             return None
 
 
+@dataclass
+class FailedTickersCache:
+    """Cache for tickers that failed to download (e.g., delisted)."""
+    tickers: set[str]
+    updated_at: datetime
+    
+    def to_json(self) -> str:
+        return json.dumps(
+            {
+                "tickers": sorted(self.tickers),
+                "updated_at": self.updated_at.isoformat(),
+            },
+            ensure_ascii=False,
+        )
+    
+    @staticmethod
+    def from_file(path: Path) -> Optional["FailedTickersCache"]:
+        try:
+            data = json.loads(path.read_text())
+            return FailedTickersCache(
+                tickers=set(data.get("tickers", [])),
+                updated_at=datetime.fromisoformat(data["updated_at"]),
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Failed to load failed tickers cache {path}: {e}")
+            return None
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _cache_paths(base: Path) -> tuple[Path, Path]:
-    return base / "prices.csv", base / "prices.meta.json"
+def _cache_paths(base: Path) -> tuple[Path, Path, Path]:
+    return base / "prices.csv", base / "prices.meta.json", base / "failed_tickers.json"
 
 
 def _download(
@@ -73,7 +101,7 @@ def _download(
                 start=start,
                 end=end,
                 auto_adjust=True,
-                progress=False,
+                progress=True,
                 threads=False,
             )
             closes = data["Close"] if isinstance(data.columns, pd.MultiIndex) else data
@@ -115,15 +143,27 @@ def load_prices_with_cache(
     max_download_attempts: int = 5,
     backoff_base_s: float = 5.0,
     backoff_max_s: float = 60.0,
+    failed_tickers_retry_age: timedelta = timedelta(days=1),
 ) -> pd.DataFrame:
     cache_dir.mkdir(parents=True, exist_ok=True)
-    csv_path, meta_path = _cache_paths(cache_dir)
+    csv_path, meta_path, failed_path = _cache_paths(cache_dir)
 
     universe = sorted(set(tickers))
     now = _now()
 
     meta = CacheMeta.from_file(meta_path) if meta_path.exists() else None
     prices: Optional[pd.DataFrame] = None
+    
+    # Load failed tickers cache (tickers that previously failed to download)
+    failed_cache = FailedTickersCache.from_file(failed_path) if failed_path.exists() else None
+    failed_tickers: set[str] = set()
+    if failed_cache is not None:
+        age = now - failed_cache.updated_at
+        if age < failed_tickers_retry_age:
+            failed_tickers = failed_cache.tickers
+            logger.info(f"Loaded {len(failed_tickers)} known failed tickers (will skip download)")
+        else:
+            logger.info(f"Failed tickers cache expired ({age.days} days old), will retry all")
 
     if csv_path.exists():
         try:
@@ -155,9 +195,18 @@ def load_prices_with_cache(
 
     # If cache is missing requested tickers, do not discard the whole cache.
     # Instead, we will best-effort download only the missing columns and merge them in.
+    # Skip tickers that are known to have failed previously (e.g., delisted).
     missing_cols: list[str] = []
+    skipped_failed: list[str] = []
     if prices is not None:
-        missing_cols = [t for t in universe if t not in prices.columns]
+        for t in universe:
+            if t not in prices.columns:
+                if t in failed_tickers:
+                    skipped_failed.append(t)
+                else:
+                    missing_cols.append(t)
+        if skipped_failed:
+            logger.info(f"Skipping {len(skipped_failed)} known failed tickers (delisted/invalid)")
         if missing_cols:
             logger.info(f"Cache missing {len(missing_cols)} requested tickers; will try to fetch missing columns")
 
@@ -180,6 +229,14 @@ def load_prices_with_cache(
                 prices = fresh
                 logger.info(f"Replaced cache with fresh download {prices.shape}")
                 needs_partial = False
+                
+                # Identify and cache failed tickers from full refresh
+                downloaded_tickers = set(fresh.columns)
+                newly_failed = set(universe) - downloaded_tickers
+                if newly_failed:
+                    logger.info(f"Full refresh: identified {len(newly_failed)} failed tickers")
+                    failed_cache = FailedTickersCache(tickers=newly_failed, updated_at=now)
+                    failed_path.write_text(failed_cache.to_json())
         except Exception as e:  # noqa: BLE001
             logger.error(f"Full refresh failed, keeping existing cache: {e}")
 
@@ -194,6 +251,17 @@ def load_prices_with_cache(
                 backoff_base_s=backoff_base_s,
                 backoff_max_s=backoff_max_s,
             )
+            # Identify tickers that failed to download (requested but not in result)
+            downloaded_tickers = set(missing.columns) if not missing.empty else set()
+            newly_failed = set(missing_cols) - downloaded_tickers
+            if newly_failed:
+                logger.info(f"Identified {len(newly_failed)} newly failed tickers (delisted/invalid)")
+                # Update failed tickers cache
+                all_failed = failed_tickers | newly_failed
+                failed_cache = FailedTickersCache(tickers=all_failed, updated_at=now)
+                failed_path.write_text(failed_cache.to_json())
+                logger.info(f"Updated failed tickers cache: {len(all_failed)} total")
+            
             if not missing.empty:
                 merged = prices.join(missing, how="outer")
                 merged = merged.sort_index()
@@ -201,7 +269,7 @@ def load_prices_with_cache(
                 meta = CacheMeta(created_at=now, start=start, end=end, universe_size=len(universe))
                 meta_path.write_text(meta.to_json())
                 prices = merged
-                logger.info(f"Merged {len(missing_cols)} missing tickers into cache, new shape {prices.shape}")
+                logger.info(f"Merged {len(downloaded_tickers)} tickers into cache, new shape {prices.shape}")
         except Exception as e:  # noqa: BLE001
             logger.error(f"Missing-columns refresh failed, keeping existing cache: {e}")
 
