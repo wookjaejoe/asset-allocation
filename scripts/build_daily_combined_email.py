@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import base64
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -19,18 +18,6 @@ def _read_text(path: Path) -> str:
         return ""
     try:
         return path.read_text(encoding="utf-8")
-    except Exception:
-        return ""
-
-
-def _csv_to_base64_data_uri(path: Path) -> str:
-    """Convert CSV file to base64 data URI for download link."""
-    if not path.exists():
-        return ""
-    try:
-        content = path.read_bytes()
-        b64 = base64.b64encode(content).decode("ascii")
-        return f"data:text/csv;base64,{b64}"
     except Exception:
         return ""
 
@@ -109,10 +96,6 @@ def main() -> None:
     # Read decision notes
     rank_notes = _read_text(rank_notes_path)
     aa_notes = _read_text(aa_notes_path)
-    
-    # Create data URIs for CSV downloads
-    rank_csv_uri = _csv_to_base64_data_uri(rank_signals_path)
-    aa_csv_uri = _csv_to_base64_data_uri(aa_signals_path)
 
     # Meta (best-effort)
     asof_kst = None
@@ -176,27 +159,6 @@ code { background: #f6f8fa; padding: 1px 4px; border-radius: 4px; }
     max-height: 500px;
     overflow-y: auto;
 }
-
-/* Download button */
-.download-btn {
-    display: inline-block;
-    background: #0066cc;
-    color: white !important;
-    padding: 6px 12px;
-    border-radius: 4px;
-    text-decoration: none;
-    font-size: 12px;
-    margin: 4px 4px 4px 0;
-}
-.download-btn:hover { background: #0052a3; }
-.downloads-section {
-    background: #f0f7ff;
-    border: 1px solid #b8d4f0;
-    border-radius: 8px;
-    padding: 12px 16px;
-    margin: 16px 0;
-}
-.downloads-title { font-weight: 600; font-size: 13px; margin-bottom: 8px; }
 </style>
 """.strip()
 
@@ -240,11 +202,6 @@ code { background: #f6f8fa; padding: 1px 4px; border-radius: 4px; }
     # Decision Notes
     toc_parts.append("<div class='toc-section'>")
     toc_parts.append("<span class='toc-section-title'>4. Decision Notes (검산용)</span>")
-    toc_parts.append("</div>")
-    
-    # Downloads
-    toc_parts.append("<div class='toc-section'>")
-    toc_parts.append("<span class='toc-section-title'>5. Downloads (CSV)</span>")
     toc_parts.append("</div>")
     
     toc_parts.append("</div>")
@@ -339,24 +296,6 @@ code { background: #f6f8fa; padding: 1px 4px; border-radius: 4px; }
         parts.append(f"<pre class='notes-content'>{escaped_rank}</pre>")
     else:
         parts.append("<p><i>Rank decision notes not available</i></p>")
-    
-    # Downloads section (CSV data embedded as base64)
-    parts.append("<h2>5. Downloads (CSV)</h2>")
-    parts.append("<div class='downloads-section'>")
-    parts.append("<div class='downloads-title'>Signal CSV Files</div>")
-    parts.append("<p style='font-size: 12px; color: #555; margin: 0 0 8px;'>아래 버튼을 클릭하면 CSV 파일을 다운로드할 수 있습니다.</p>")
-    
-    if aa_csv_uri:
-        parts.append(f"<a class='download-btn' href='{aa_csv_uri}' download='asset_allocation_signals_{date}.csv'>Asset Allocation signals.csv</a>")
-    else:
-        parts.append("<span style='font-size: 12px; color: #999;'>Asset Allocation CSV not available</span>")
-    
-    if rank_csv_uri:
-        parts.append(f"<a class='download-btn' href='{rank_csv_uri}' download='rank_signals_{date}.csv'>Rank signals.csv</a>")
-    else:
-        parts.append("<span style='font-size: 12px; color: #999;'>Rank CSV not available</span>")
-    
-    parts.append("</div>")
     
     parts.append("</div></body></html>")
 
