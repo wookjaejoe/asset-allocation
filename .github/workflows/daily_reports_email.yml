@@ -1,7 +1,13 @@
 name: daily-reports-email
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      mail_to:
+        description: "이메일 수신자 (비워두면 vars.MAIL_TO 사용)"
+        required: false
+        default: ""
+        type: string
   # NOTE: Enable this schedule only if you disable the two separate daily workflows,
   # otherwise you'll send duplicate emails.
   # schedule:
@@ -70,17 +76,22 @@ jobs:
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
           SMTP_STARTTLS: ${{ vars.SMTP_STARTTLS }}
           MAIL_FROM: ${{ vars.MAIL_FROM }}
-          MAIL_TO: ${{ vars.MAIL_TO }}
+          MAIL_TO_INPUT: ${{ inputs.mail_to }}
+          MAIL_TO_DEFAULT: ${{ vars.MAIL_TO }}
         run: |
+          # Use input value if provided, otherwise fall back to vars.MAIL_TO
+          MAIL_TO="${MAIL_TO_INPUT:-$MAIL_TO_DEFAULT}"
           if [[ -z "${SMTP_HOST}" || -z "${MAIL_FROM}" || -z "${MAIL_TO}" || -z "${SMTP_PASS}" ]]; then
             echo "SMTP vars/secrets not configured; skipping send."
             exit 0
           fi
+          echo "Sending email to: ${MAIL_TO}"
           TODAY_KST="$(TZ=Asia/Seoul date +%Y%m%d)"
           SUBJECT="[Daily] Reports (${TODAY_KST} 08:00 KST)"
           python scripts/send_email_smtp.py \
             --subject "${SUBJECT}" \
             --html ".output/daily_reports/${TODAY_KST}/email.html" \
+            --to "${MAIL_TO}" \
             --attach ".output/rank_analysis.html" \
             --attach ".output/aa_analysis.html"
 
