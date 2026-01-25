@@ -1,18 +1,10 @@
-name: daily-reports-email
+name: daily-reports-generate
 
 on:
   workflow_dispatch:
-    inputs:
-      mail_to:
-        description: "이메일 수신자 (비워두면 vars.MAIL_TO 사용)"
-        required: false
-        default: ""
-        type: string
-  # NOTE: Enable this schedule only if you disable the two separate daily workflows,
-  # otherwise you'll send duplicate emails.
-  # schedule:
-  #   # 08:00 KST = 23:00 UTC (previous day)
-  #   - cron: "0 23 * * *"
+  schedule:
+    # 07:00 KST = 22:00 UTC (previous day)
+    - cron: "0 22 * * 0"
 
 jobs:
   run:
@@ -25,13 +17,31 @@ jobs:
       TOPS_CSV: "50"
       REBAL_MONTHS_CSV: "1,3,6"
     steps:
+      - name: Check odd week (KST) or manual run
+        id: weekcheck
+        shell: bash
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          WEEK="$(TZ=Asia/Seoul date +%V)"
+          if ((10#$WEEK % 2 == 1)); then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.weekcheck.outputs.run == 'true'
 
       - uses: actions/setup-python@v5
+        if: steps.weekcheck.outputs.run == 'true'
         with:
           python-version: "3.11"
 
       - name: Cache price data
+        if: steps.weekcheck.outputs.run == 'true'
         uses: actions/cache@v4
         with:
           path: .cache
@@ -40,62 +50,40 @@ jobs:
             price-cache-${{ runner.os }}-
 
       - name: Install dependencies
+        if: steps.weekcheck.outputs.run == 'true'
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-actions.txt
 
       - name: Generate daily signals + email bodies
+        if: steps.weekcheck.outputs.run == 'true'
         run: |
           python scripts/daily_asset_allocation_report.py
           python scripts/daily_rank_report.py \
             --top 20 \
             --head-lookbacks "120,252" \
-            --tail-lookbacks "5,10"
+            --tail-lookbacks "20,40"
 
       - name: Run rank backtests + analysis
+        if: steps.weekcheck.outputs.run == 'true'
         run: |
           bash scripts/run_rank_backtests.sh
 
       - name: Run asset allocation backtests + analysis
+        if: steps.weekcheck.outputs.run == 'true'
         run: |
           bash scripts/run_aa_backtests.sh
           python scripts/analyze_aa_summary.py
 
       - name: Build combined email body (HTML)
+        if: steps.weekcheck.outputs.run == 'true'
         shell: bash
         run: |
           TODAY_KST="$(TZ=Asia/Seoul date +%Y%m%d)"
           python scripts/build_daily_combined_email.py --date "${TODAY_KST}"
 
-      - name: Send email (optional; requires SMTP_* + MAIL_*)
-        shell: bash
-        env:
-          SMTP_HOST: ${{ vars.SMTP_HOST }}
-          SMTP_PORT: ${{ vars.SMTP_PORT }}
-          SMTP_USER: ${{ vars.SMTP_USER }}
-          SMTP_PASS: ${{ secrets.SMTP_PASS }}
-          SMTP_STARTTLS: ${{ vars.SMTP_STARTTLS }}
-          MAIL_FROM: ${{ vars.MAIL_FROM }}
-          MAIL_TO_INPUT: ${{ inputs.mail_to }}
-          MAIL_TO_DEFAULT: ${{ vars.MAIL_TO }}
-        run: |
-          # Use input value if provided, otherwise fall back to vars.MAIL_TO
-          MAIL_TO="${MAIL_TO_INPUT:-$MAIL_TO_DEFAULT}"
-          if [[ -z "${SMTP_HOST}" || -z "${MAIL_FROM}" || -z "${MAIL_TO}" || -z "${SMTP_PASS}" ]]; then
-            echo "SMTP vars/secrets not configured; skipping send."
-            exit 0
-          fi
-          echo "Sending email to: ${MAIL_TO}"
-          TODAY_KST="$(TZ=Asia/Seoul date +%Y%m%d)"
-          SUBJECT="[Daily] Reports (${TODAY_KST} 08:00 KST)"
-          python scripts/send_email_smtp.py \
-            --subject "${SUBJECT}" \
-            --html ".output/daily_reports/${TODAY_KST}/email.html" \
-            --to "${MAIL_TO}" \
-            --attach ".output/rank_analysis.html" \
-            --attach ".output/aa_analysis.html"
-
       - name: Upload artifacts
+        if: steps.weekcheck.outputs.run == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: daily-reports-output
@@ -108,4 +96,3 @@ jobs:
             .output/rank_analysis.html
             .output/asset_allocation
             .output/aa_analysis.html
-

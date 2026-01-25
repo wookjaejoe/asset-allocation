@@ -49,11 +49,6 @@ METRIC_EXPLANATIONS = [
 ]
 
 SECTION_GUIDES = {
-    "recommendation": [
-        "이론적 배경: 모멘텀(head)은 6~12개월(약 126~252 거래일)에서, 리버설(tail)은 1주~1개월(약 5~21 거래일)에서 효과적이라고 알려져 있습니다.",
-        "아래 추천안은 백테스트 결과에서 CAGR, Sharpe-like, 초과수익(active), 안정성(std) 등을 종합하여 도출합니다.",
-        "최종 선택 시 변동성(ann_vol), 최대낙폭(max_drawdown)도 함께 고려하세요.",
-    ],
     "lookback_trend": [
         "의미: 동일 rebalance_months 평균을 통해 룩백·top 조합별 전반적 성향을 봅니다.",
         "해석 팁: <code>cagr</code>·<code>period_active_mean</code>은 높고 <code>ann_vol</code>·<code>max_drawdown</code>은 낮은 지점을 찾고, <code>sharpe_like</code>가 함께 높으면 효율적입니다.",
@@ -91,152 +86,6 @@ def section_with_guide(title: str, guide_key: str, body: str) -> str:
     guide_lines = SECTION_GUIDES.get(guide_key, [])
     guide_html = "".join(f"<p>{line}</p>" for line in guide_lines)
     return f"<h2>{title}</h2>\n<div class='guide'>{guide_html}</div>\n{body}"
-
-
-def build_recommendation_section(df: pd.DataFrame) -> str:
-    """Build a recommendation section based on backtest results.
-    
-    방식2: mode + lookback + top으로 groupby하고, rebalance_months만 평균.
-    안정성 지표(CAGR std)를 함께 표시하여 불안정한 조합을 필터링.
-    """
-    df = add_sharpe_like(df)
-    
-    # 방식2: mode + lookback + top으로 groupby (rebalance_months만 평균)
-    agg = df.groupby(["mode", "lookback", "top"]).agg({
-        "cagr": ["mean", "std"],
-        "ann_vol": "mean",
-        "max_drawdown": "mean",
-        "period_active_mean": ["mean", "std"],
-        "sharpe_like": "mean",
-    }).reset_index()
-    
-    # Flatten column names
-    agg.columns = [
-        "mode", "lookback", "top",
-        "cagr_mean", "cagr_std",
-        "ann_vol", "max_drawdown",
-        "active_mean", "active_std",
-        "sharpe_like"
-    ]
-    agg["cagr_std"] = agg["cagr_std"].fillna(0)
-    agg["active_std"] = agg["active_std"].fillna(0)
-    
-    # 안정성 등급 (CAGR std 기준)
-    def stability_grade(std):
-        if std < 0.03:
-            return "좋음", "stability-good"
-        elif std < 0.06:
-            return "보통", "stability-medium"
-        else:
-            return "나쁨", "stability-bad"
-    
-    recommendations = []
-    
-    for mode in ["head", "tail"]:
-        mode_data = agg[agg["mode"] == mode].copy()
-        if mode_data.empty:
-            continue
-        
-        mode_label = "모멘텀(Head)" if mode == "head" else "리버설(Tail)"
-        theory_range = "126~252 거래일 (6~12개월)" if mode == "head" else "5~21 거래일 (1주~1개월)"
-        
-        # 안정성 필터: cagr_std < 0.10 (10% 이상 변동은 제외)
-        stable_data = mode_data[mode_data["cagr_std"] < 0.10].copy()
-        if stable_data.empty:
-            stable_data = mode_data.copy()  # fallback
-        
-        # Score: sharpe 40%, cagr 30%, 안정성(1-std) 30%
-        stable_data["score"] = (
-            stable_data["sharpe_like"] / (stable_data["sharpe_like"].max() + 1e-9) * 0.40 +
-            stable_data["cagr_mean"] / (stable_data["cagr_mean"].max() + 1e-9) * 0.30 +
-            (1 - stable_data["cagr_std"] / (stable_data["cagr_std"].max() + 1e-9)) * 0.30
-        )
-        
-        stable_data = stable_data.sort_values("score", ascending=False)
-        
-        rec_html = f"""
-        <div class="recommendation-card">
-            <h3>{mode_label} 전략</h3>
-            <p><strong>이론적 최적 구간:</strong> {theory_range}</p>
-            <p><strong>백테스트 기반 추천 (top별, rbm 평균):</strong></p>
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th>순위</th>
-                        <th>Lookback</th>
-                        <th>Top</th>
-                        <th>CAGR</th>
-                        <th>CAGR Std</th>
-                        <th>Sharpe</th>
-                        <th>Vol</th>
-                        <th>MDD</th>
-                        <th>안정성</th>
-                    </tr>
-                </thead>
-                <tbody>
-        """
-        
-        for rank, (_, row) in enumerate(stable_data.head(4).iterrows(), 1):
-            grade, grade_class = stability_grade(row["cagr_std"])
-            rec_html += f"""
-                    <tr>
-                        <td>{rank}순위</td>
-                        <td>{int(row['lookback'])}일</td>
-                        <td>{int(row['top'])}개</td>
-                        <td>{row['cagr_mean']:.1%}</td>
-                        <td>{row['cagr_std']:.1%}</td>
-                        <td>{row['sharpe_like']:.2f}</td>
-                        <td>{row['ann_vol']:.1%}</td>
-                        <td>{row['max_drawdown']:.1%}</td>
-                        <td class="{grade_class}">{grade}</td>
-                    </tr>
-            """
-        
-        rec_html += """
-                </tbody>
-            </table>
-        </div>
-        """
-        recommendations.append(rec_html)
-        
-        # 불안정한 조합 경고
-        unstable = mode_data[mode_data["cagr_std"] >= 0.10]
-        if not unstable.empty:
-            warning_items = []
-            for _, row in unstable.iterrows():
-                warning_items.append(
-                    f"lk={int(row['lookback'])} top={int(row['top'])}: "
-                    f"CAGR std={row['cagr_std']:.1%}"
-                )
-            recommendations.append(f"""
-            <div class="warning-box">
-                <strong>⚠️ {mode_label} 불안정 조합 (리밸런스 주기에 따라 성과 편차 큼):</strong>
-                <br>{', '.join(warning_items)}
-            </div>
-            """)
-    
-    # Overall recommendation
-    overall_html = """
-    <div class="recommendation-summary">
-        <h3>운영 권장사항</h3>
-        <ul>
-            <li><strong>모멘텀(Head):</strong> 중기 lookback(120~252일)이 안정적이고 효과적입니다. 이론과 일치합니다.</li>
-            <li><strong>리버설(Tail):</strong> 단기 lookback(10~20일)에서 리버설 효과가 나타납니다. 
-                단, 극단기(5일)는 리밸런스 주기에 따라 성과 편차가 크므로 주의하세요.</li>
-            <li><strong>종목 수(top):</strong> S&P500의 5~10% 수준(25~50개)이 통계적으로 의미있습니다.
-                top25는 수익률↑/변동성↑, top50은 안정성↑입니다.</li>
-            <li><strong>안정성 지표:</strong> CAGR Std(표준편차)가 3% 미만이면 '좋음', 
-                6% 이상이면 리밸런스 주기 선택에 민감하므로 주의가 필요합니다.</li>
-            <li><strong>리밸런스 주기:</strong> 월별(1개월)이 기본이며, 거래비용 절감 시 분기(3개월)도 가능합니다.</li>
-        </ul>
-    </div>
-    """
-    
-    return section_with_guide(
-        "최종 Lookback 추천안",
-        "recommendation",
-        "".join(recommendations) + overall_html
-    )
 
 
 def format_df(df: pd.DataFrame, float_cols: Iterable[str], digits: int = 3) -> pd.DataFrame:
@@ -281,13 +130,6 @@ def build_tables(df: pd.DataFrame, compare_tops: Sequence[int]) -> List[str]:
     df = ensure_cols(df, ["mode", "lookback", "top", "rebalance_months"])
     df = add_sharpe_like(df)
     metrics = available_metrics + ["sharpe_like"]
-
-    # 0) Recommendation section (first)
-    try:
-        recommendation_section = build_recommendation_section(df)
-        sections.append(recommendation_section)
-    except Exception as e:
-        sections.append(f"<h2>최종 Lookback 추천안</h2><p>추천안 생성 실패: {e}</p>")
 
     # 1) Lookback trend per mode/top (mean across rebalance months)
     grouped = (
@@ -628,53 +470,6 @@ def main():
         }}
         .data-table tr:nth-child(even) {{ background: #fafafa; }}
         .data-table tr:hover {{ background: #f0f0f0; }}
-        .recommendation-card {{
-            background: #f0fff4;
-            border: 1px solid #9ae6b4;
-            border-radius: 8px;
-            padding: 15px;
-            margin: 15px 0;
-        }}
-        .recommendation-card h3 {{
-            color: #276749;
-            margin-top: 0;
-            border-bottom: 1px solid #9ae6b4;
-            padding-bottom: 8px;
-        }}
-        .recommendation-card ul {{
-            margin: 10px 0;
-            padding-left: 20px;
-        }}
-        .recommendation-card li {{
-            margin: 8px 0;
-        }}
-        .recommendation-summary {{
-            background: #fffaf0;
-            border: 1px solid #fbd38d;
-            border-radius: 8px;
-            padding: 15px;
-            margin: 20px 0;
-        }}
-        .recommendation-summary h3 {{
-            color: #c05621;
-            margin-top: 0;
-        }}
-        .highlight {{
-            background: #fef3c7;
-            padding: 2px 5px;
-            border-radius: 3px;
-        }}
-        .warning-box {{
-            background: #fed7d7;
-            border: 1px solid #fc8181;
-            border-radius: 5px;
-            padding: 10px 15px;
-            margin: 10px 0;
-            font-size: 14px;
-        }}
-        .stability-good {{ color: #276749; font-weight: bold; }}
-        .stability-medium {{ color: #c05621; font-weight: bold; }}
-        .stability-bad {{ color: #c53030; font-weight: bold; }}
     </style>
 </head>
 <body>
