@@ -137,7 +137,7 @@ jobs:
             .output/aa_analysis.html
 
   send:
-    needs: [gate, generate]
+    needs: [ gate, generate ]
     # always() lets the send job run even if generate failed, but gate still controls schedule/manual gating.
     if: needs.gate.outputs.run == 'true' && always()
     runs-on: ubuntu-latest
