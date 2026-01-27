@@ -5,7 +5,9 @@ on:
   schedule:
     # 스케줄 트리거 동작 확인용: 5분마다(UTC) 실행
     - cron: "*/5 * * * *"
-
+  push:
+    branches:
+      - master
 jobs:
   ping:
     runs-on: ubuntu-latest
