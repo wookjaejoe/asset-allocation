@@ -25,6 +25,20 @@ from logger import logger
 KST = ZoneInfo("Asia/Seoul")
 
 
+def _parse_asof_kst(value: str) -> datetime:
+    text = value.strip()
+    if text.endswith("KST"):
+        text = text[:-3].strip()
+        dt = datetime.fromisoformat(text)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=KST)
+        return dt.astimezone(KST)
+    dt = datetime.fromisoformat(text)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=KST)
+    return dt.astimezone(KST)
+
+
 @dataclass(frozen=True)
 class StrategyRun:
     label: str
@@ -360,11 +374,7 @@ def _build_decision_notes(
 def main() -> None:
     args = parse_args()
 
-    asof_kst = (
-        datetime.fromisoformat(args.asof_kst).astimezone(KST)
-        if args.asof_kst
-        else datetime.now(tz=KST)
-    )
+    asof_kst = _parse_asof_kst(args.asof_kst) if args.asof_kst else datetime.now(tz=KST)
     head_lbs = _parse_int_list(args.head_lookbacks)
     tail_lbs = _parse_int_list(args.tail_lookbacks)
     all_lbs = sorted(set(head_lbs + tail_lbs))

@@ -14,10 +14,9 @@ on:
         default: ""
         type: string
   schedule:
-    # 원래 스케줄: 07:00 KST = 22:00 UTC (이전 일) 일요일
-    # - cron: "0 22 * * 0"
-    # 테스트용: 매 시 정각(UTC)마다 실행
-    - cron: "0 * * * *"
+    # 매주 일요일 18:00 KST (GitHub Actions cron은 UTC 기준)
+    # 18:00 KST = 09:00 UTC
+    - cron: "0 9 * * 0"
 
 jobs:
   gate:
@@ -27,20 +26,12 @@ jobs:
       send_email: ${{ steps.toggles.outputs.send_email }}
       mail_to: ${{ steps.toggles.outputs.mail_to }}
     steps:
-      - name: Check odd week (KST) or manual run
+      - name: Gate scheduled/manual run
         id: weekcheck
         shell: bash
         run: |
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          WEEK="$(TZ=Asia/Seoul date +%V)"
-          if ((10#$WEEK % 2 == 1)); then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          fi
+          # Scheduled weekly run (no odd/even week gating). Manual runs always allowed.
+          echo "run=true" >> "$GITHUB_OUTPUT"
 
       - name: Resolve email toggles
         id: toggles
@@ -73,6 +64,14 @@ jobs:
     if: needs.gate.outputs.run == 'true'
     runs-on: ubuntu-latest
     env:
+      SMTP_HOST: ${{ vars.SMTP_HOST }}
+      SMTP_PORT: ${{ vars.SMTP_PORT }}
+      SMTP_USER: ${{ vars.SMTP_USER }}
+      SMTP_PASS: ${{ secrets.SMTP_PASS }}
+      SMTP_STARTTLS: ${{ vars.SMTP_STARTTLS }}
+      MAIL_FROM: ${{ vars.MAIL_FROM }}
+      MAIL_TO: ${{ needs.gate.outputs.mail_to }}
+      SEND_EMAIL: ${{ needs.gate.outputs.send_email }}
       PYTHONPATH: ${{ github.workspace }}
       # Backtest parameters (reduced set for daily runs)
       HEAD_LOOKBACKS_CSV: "250,120,60"
@@ -85,6 +84,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      - name: Set report context (KST)
+        id: report_ctx
+        shell: bash
+        run: |
+          REPORT_ASOF_KST="$(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M:%S %Z')"
+          REPORT_DATE_KST="$(TZ=Asia/Seoul date +%Y%m%d)"
+          echo "report_date=${REPORT_DATE_KST}" >> "$GITHUB_OUTPUT"
+          echo "report_asof=${REPORT_ASOF_KST}" >> "$GITHUB_OUTPUT"
 
       - name: Cache price data
         uses: actions/cache@v4
@@ -101,11 +109,12 @@ jobs:
 
       - name: Generate daily signals + email bodies
         run: |
-          python scripts/daily_asset_allocation_report.py
+          python scripts/daily_asset_allocation_report.py --asof-kst "${{ steps.report_ctx.outputs.report_asof }}"
           python scripts/daily_rank_report.py \
             --top 20 \
             --head-lookbacks "120,252" \
-            --tail-lookbacks "20,40"
+            --tail-lookbacks "20,40" \
+            --asof-kst "${{ steps.report_ctx.outputs.report_asof }}"
 
       - name: Run rank backtests + analysis
         run: |
@@ -119,10 +128,60 @@ jobs:
       - name: Build combined email body (HTML)
         shell: bash
         run: |
-          TODAY_KST="$(TZ=Asia/Seoul date +%Y%m%d)"
-          python scripts/build_daily_combined_email.py --date "${TODAY_KST}"
+          python scripts/build_daily_combined_email.py --date "${{ steps.report_ctx.outputs.report_date }}"
+
+      - name: Email disabled
+        if: env.SEND_EMAIL != 'true'
+        run: echo "Email sending disabled (SEND_EMAIL=${SEND_EMAIL}); skipping send job."
+
+      - name: Send email (success or failure)
+        if: env.SEND_EMAIL == 'true' && always()
+        shell: bash
+        run: |
+          MAIL_TO_RESOLVED="${MAIL_TO:-}"
+          if [[ -z "${SMTP_HOST}" || -z "${MAIL_FROM}" || -z "${MAIL_TO_RESOLVED}" || -z "${SMTP_PASS}" ]]; then
+            echo "SMTP vars/secrets not configured; skipping send."
+            exit 0
+          fi
+
+          JOB_STATUS="${{ job.status }}"
+          REPORT_DATE_KST="${{ steps.report_ctx.outputs.report_date }}"
+          if [[ -z "${REPORT_DATE_KST}" ]]; then
+            REPORT_DATE_KST="$(TZ=Asia/Seoul date +%Y%m%d)"
+          fi
+          EMAIL_HTML=".output/daily_reports/${REPORT_DATE_KST}/email.html"
+
+          if [[ "${JOB_STATUS}" == "success" && -f "${EMAIL_HTML}" ]]; then
+            SUBJECT="[Daily] Reports (${REPORT_DATE_KST} 18:00 KST)"
+            python scripts/send_email_smtp.py \
+              --subject "${SUBJECT}" \
+              --html "${EMAIL_HTML}" \
+              --to "${MAIL_TO_RESOLVED}" \
+              --attach ".output/rank_analysis.html" \
+              --attach ".output/aa_analysis.html"
+            exit 0
+          fi
+
+          mkdir -p .output
+          FAIL_HTML=".output/daily_reports_failure_${REPORT_DATE_KST}.html"
+          cat > "${FAIL_HTML}" <<HTML
+          <html>
+            <body>
+              <h2>Daily report generation failed</h2>
+              <p>The scheduled report for ${REPORT_DATE_KST} (KST) did not complete successfully.</p>
+              <p>Please contact the administrator to investigate the workflow run.</p>
+            </body>
+          </html>
+          HTML
+
+          SUBJECT="[Daily] Reports FAILED (${REPORT_DATE_KST} 18:00 KST)"
+          python scripts/send_email_smtp.py \
+            --subject "${SUBJECT}" \
+            --html "${FAIL_HTML}" \
+            --to "${MAIL_TO_RESOLVED}"
 
       - name: Upload artifacts
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: daily-reports-output
@@ -135,83 +194,3 @@ jobs:
             .output/rank_analysis.html
             .output/asset_allocation
             .output/aa_analysis.html
-
-  send:
-    needs: [gate, generate]
-    # always() lets the send job run even if generate failed, but gate still controls schedule/manual gating.
-    if: needs.gate.outputs.run == 'true' && always()
-    runs-on: ubuntu-latest
-    permissions:
-      actions: read
-      contents: read
-    env:
-      SMTP_HOST: ${{ vars.SMTP_HOST }}
-      SMTP_PORT: ${{ vars.SMTP_PORT }}
-      SMTP_USER: ${{ vars.SMTP_USER }}
-      SMTP_PASS: ${{ secrets.SMTP_PASS }}
-      SMTP_STARTTLS: ${{ vars.SMTP_STARTTLS }}
-      MAIL_FROM: ${{ vars.MAIL_FROM }}
-      MAIL_TO: ${{ needs.gate.outputs.mail_to }}
-      SEND_EMAIL: ${{ needs.gate.outputs.send_email }}
-      GENERATE_RESULT: ${{ needs.generate.result }}
-    steps:
-      - name: Email disabled
-        if: env.SEND_EMAIL != 'true'
-        run: echo "Email sending disabled (SEND_EMAIL=${SEND_EMAIL}); skipping send job."
-
-      - uses: actions/checkout@v4
-        if: env.SEND_EMAIL == 'true'
-
-      - uses: actions/setup-python@v5
-        if: env.SEND_EMAIL == 'true'
-        with:
-          python-version: "3.11"
-
-      - name: Download latest artifacts from this run
-        if: env.SEND_EMAIL == 'true' && needs.generate.result == 'success'
-        uses: actions/download-artifact@v4
-        with:
-          name: daily-reports-output
-          path: .
-
-      - name: Send email (success or failure)
-        if: env.SEND_EMAIL == 'true'
-        shell: bash
-        run: |
-          MAIL_TO_RESOLVED="${MAIL_TO:-}"
-          if [[ -z "${SMTP_HOST}" || -z "${MAIL_FROM}" || -z "${MAIL_TO_RESOLVED}" || -z "${SMTP_PASS}" ]]; then
-            echo "SMTP vars/secrets not configured; skipping send."
-            exit 0
-          fi
-
-          TODAY_KST="$(TZ=Asia/Seoul date +%Y%m%d)"
-          EMAIL_HTML=".output/daily_reports/${TODAY_KST}/email.html"
-
-          if [[ "${GENERATE_RESULT}" == "success" && -f "${EMAIL_HTML}" ]]; then
-            SUBJECT="[Daily] Reports (${TODAY_KST} 08:00 KST)"
-            python scripts/send_email_smtp.py \
-              --subject "${SUBJECT}" \
-              --html "${EMAIL_HTML}" \
-              --to "${MAIL_TO_RESOLVED}" \
-              --attach ".output/rank_analysis.html" \
-              --attach ".output/aa_analysis.html"
-            exit 0
-          fi
-
-          mkdir -p .output
-          FAIL_HTML=".output/daily_reports_failure_${TODAY_KST}.html"
-          cat > "${FAIL_HTML}" <<HTML
-          <html>
-            <body>
-              <h2>Daily report generation failed</h2>
-              <p>The scheduled report for ${TODAY_KST} (KST) did not complete successfully.</p>
-              <p>Please contact the administrator to investigate the workflow run.</p>
-            </body>
-          </html>
-          HTML
-
-          SUBJECT="[Daily] Reports FAILED (${TODAY_KST} 08:00 KST)"
-          python scripts/send_email_smtp.py \
-            --subject "${SUBJECT}" \
-            --html "${FAIL_HTML}" \
-            --to "${MAIL_TO_RESOLVED}"

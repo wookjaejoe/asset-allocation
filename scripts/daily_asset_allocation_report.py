@@ -26,6 +26,20 @@ from strategy.mdm import Assets as MDMAssets, InvestmentStrategyMDM
 KST = ZoneInfo("Asia/Seoul")
 
 
+def _parse_asof_kst(value: str) -> datetime:
+    text = value.strip()
+    if text.endswith("KST"):
+        text = text[:-3].strip()
+        dt = datetime.fromisoformat(text)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=KST)
+        return dt.astimezone(KST)
+    dt = datetime.fromisoformat(text)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=KST)
+    return dt.astimezone(KST)
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Generate daily asset-allocation (integration) holdings + HTML email body.")
     p.add_argument("--output-dir", default=".output/daily_asset_allocation", help="산출물 디렉토리")
@@ -325,11 +339,7 @@ def main() -> None:
     # Strategies may write intermediate CSVs under ./output (legacy path).
     Path("output").mkdir(parents=True, exist_ok=True)
 
-    asof_kst = (
-        datetime.fromisoformat(args.asof_kst).astimezone(KST)
-        if args.asof_kst
-        else datetime.now(tz=KST)
-    )
+    asof_kst = _parse_asof_kst(args.asof_kst) if args.asof_kst else datetime.now(tz=KST)
 
     tickers = sorted(InvestmentStrategyIntegration.get_assets())
     if args.start:

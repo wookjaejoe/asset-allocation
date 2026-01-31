@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local caches/outputs
+.cache/
+.output/
+logs/
+output/
+.logs/
+
+# IDEs
+.idea/
+.vscode/
+
+# OS files
+.DS_Store
