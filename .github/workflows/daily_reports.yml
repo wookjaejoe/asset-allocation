@@ -59,6 +59,9 @@ jobs:
           echo "send_email=${send_email}" >> "$GITHUB_OUTPUT"
           echo "mail_to=${mail_to}" >> "$GITHUB_OUTPUT"
 
+      - name: Keep workflow alive
+        uses: peter-evans/keepalive-workflow@v3
+
   generate:
     needs: gate
     if: needs.gate.outputs.run == 'true'
