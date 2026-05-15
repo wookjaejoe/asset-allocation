@@ -21,6 +21,8 @@ on:
 jobs:
   gate:
     runs-on: ubuntu-latest
+    permissions:
+      actions: write
     outputs:
       run: ${{ steps.weekcheck.outputs.run }}
       send_email: ${{ steps.toggles.outputs.send_email }}
@@ -60,7 +62,7 @@ jobs:
           echo "mail_to=${mail_to}" >> "$GITHUB_OUTPUT"
 
       - name: Keep workflow alive
-        uses: peter-evans/keepalive-workflow@v3
+        uses: liskin/gh-workflow-keepalive@v1.2.1
 
   generate:
     needs: gate
